@@ -1,0 +1,109 @@
+"""
+repo_reader.py — safe, bounded repo access.
+
+All path operations go through safe_resolve().
+No writes. No follows outside REPO_ROOT.
+"""
+
+from pathlib import Path
+from fastapi import HTTPException
+from . import config
+
+
+def safe_resolve(rel_path: str) -> Path:
+    """
+    Resolve a relative path under REPO_ROOT.
+    Raises HTTP 400 if the path would escape REPO_ROOT (path traversal guard).
+    """
+    p = (config.REPO_ROOT / rel_path.lstrip("/")).resolve()
+    repo_str = str(config.REPO_ROOT)
+    if not str(p).startswith(repo_str):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Path traversal rejected: {rel_path!r}"
+        )
+    return p
+
+
+def rel_path(path: Path) -> str:
+    """Return path as string relative to REPO_ROOT."""
+    try:
+        return str(path.relative_to(config.REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def should_skip(path: Path) -> bool:
+    """True if any path component is in SKIP_DIRS."""
+    try:
+        parts = path.relative_to(config.REPO_ROOT).parts
+        return any(part in config.SKIP_DIRS for part in parts)
+    except ValueError:
+        return False
+
+
+def is_never_index(path: Path) -> bool:
+    """True if this file should never be indexed (env files etc)."""
+    return path.name in config.NEVER_INDEX_FILES
+
+
+def walk_repo(base: Path, extensions: set[str] | None = None) -> list[Path]:
+    """
+    Walk base directory, skipping heavy dirs, returning code files.
+    Respects CODE_EXTENSIONS filter unless overridden.
+    """
+    ext_filter = extensions or config.CODE_EXTENSIONS
+    results: list[Path] = []
+    try:
+        for item in sorted(base.rglob("*")):
+            if (
+                item.is_file()
+                and item.suffix in ext_filter
+                and not should_skip(item)
+                and not is_never_index(item)
+            ):
+                results.append(item)
+    except PermissionError:
+        pass
+    return results
+
+
+def read_file(path: Path, max_bytes: int | None = None) -> str:
+    """
+    Read a file up to max_bytes. Returns empty string on any error.
+    Handles encoding errors gracefully.
+    """
+    limit = max_bytes or config.MAX_FILE_BYTES
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read(limit)
+    except Exception:
+        return ""
+
+
+def build_snippet_block(
+    files: list[tuple[str, str]],
+    max_chars: int | None = None,
+) -> str:
+    """
+    Aggregate (path, content) pairs into a single snippet block.
+    Stops adding content once the character budget is exhausted.
+    Always includes at least one line per file even if over budget.
+    """
+    budget = max_chars or config.MAX_TOTAL_CHARS
+    block: list[str] = []
+    total = 0
+
+    for path, content in files:
+        header = f"\n### {path}\n```\n"
+        footer = "\n```\n"
+        available = budget - total - len(header) - len(footer)
+        if available <= 0:
+            # Include file name only so Claude knows it exists
+            block.append(f"\n### {path}\n[truncated — over context budget]\n")
+            continue
+        chunk = content[:available]
+        block.append(header + chunk + footer)
+        total += len(header) + len(chunk) + len(footer)
+
+    return "".join(block)

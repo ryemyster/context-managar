@@ -1,0 +1,11 @@
+# Local environment — contains your repo path, never commit
+.env
+
+# Generated context files — Claude reads these but they don't belong in git
+ai-context/*
+!ai-context/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/

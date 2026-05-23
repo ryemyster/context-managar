@@ -1,0 +1,34 @@
+services:
+  repo-analyzer:
+    build:
+      context: ./repo-analyzer
+    container_name: repo-analyzer
+    ports:
+      - "8088:8088"
+    environment:
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://founderos-ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5-coder:3b}
+      - REPO_ROOT=/repo
+      - OUTPUT_DIR=/output
+    volumes:
+      - ${REPO_PATH:-.}:/repo:ro
+      - ./ai-context:/output
+    networks:
+      - founderos_net
+    depends_on: []
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+# Ollama is not managed here.
+# It runs as founderos-ollama on the founderos_default network.
+# See docs/ollama-optimization.md for tuning the existing container.
+
+networks:
+  founderos_net:
+    external: true
+    name: founderos_default
