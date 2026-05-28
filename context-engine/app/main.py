@@ -11,9 +11,11 @@ Hard rules enforced here:
 - Graceful degradation on all external services (Ollama, Supabase)
 """
 
+import time
 from fastapi import FastAPI, HTTPException
 from . import config
 from . import ollama_client, supabase_vector
+from .logger import log
 from . import markdown_writer as mw
 from .models import (
     ScanRequest, FindRequest, DependenciesRequest, SummarizeRequest,
@@ -246,7 +248,10 @@ async def setup():
         "| context bundles         | PR review             |\n"
         "| diff summaries          | security review       |\n"
         "| vector retrieval        | final decisions       |\n\n"
-        "**Hard constraint:** this service never writes to the repo. All output goes to `./ai-context/` as Markdown.\n"
+        "**Hard constraint:** this service never writes to the repo. All output goes to `./ai-context/` as Markdown.\n\n"
+        f"**Path convention:** `REPO_ROOT` is `{repo}` (your `~/Repos` directory). All `path` parameters must be\n"
+        "prefixed with `<owner>/<repo-name>/` — e.g. `\"ryemyster/local-model/src\"`. A bare `\".\"` scans\n"
+        "**all** of `~/Repos` which is never what you want. Always scope to a specific repo.\n"
         "\n---\n\n"
 
         "## Live capabilities\n\n"
@@ -280,7 +285,7 @@ async def setup():
         "```json\n"
         "{\n"
         '  "task": "describe what you are about to implement",\n'
-        '  "paths": ["src/app", "src/lib", "supabase"],\n'
+        '  "paths": ["ryemyster/local-model/src", "ascendvent/checkin/src/app"],\n'
         '  "focus": ["auth", "stripe", "relevant-terms"]\n'
         "}\n"
         "```\n\n"
@@ -293,19 +298,19 @@ async def setup():
         "- `written_to` — path to `./ai-context/context-bundle.md`; read this file\n\n"
 
         "### POST /scan\n"
-        '`{"path": "src/app/api"}` → file list, summary, patterns · writes `scan-<slug>.md`\n\n'
+        '`{"path": "ryemyster/local-model/src/app/api"}` → file list, summary, patterns · writes `scan-<slug>.md`\n\n'
 
         "### POST /find\n"
-        '`{"query": "stripe subscription enforcement", "path": "src"}` → matching files + synthesis · writes `find-<slug>.md`\n\n'
+        '`{"query": "stripe subscription enforcement", "path": "ascendvent/checkin/src"}` → matching files + synthesis · writes `find-<slug>.md`\n\n'
 
         "### POST /summarize\n"
-        '`{"file": "src/app/api/checkins/route.ts"}` → purpose, deps, risks, architectural notes · writes `summary-<slug>.md`\n\n'
+        '`{"file": "ascendvent/checkin/src/app/api/checkins/route.ts"}` → purpose, deps, risks, architectural notes · writes `summary-<slug>.md`\n\n'
 
         "### POST /routes\n"
-        "`{}` → api_routes, page_routes, server_actions, middleware, auth_paths · writes `routes.md`\n\n"
+        '`{"path": "ascendvent/checkin"}` → api_routes, page_routes, server_actions, middleware, auth_paths · writes `routes.md`\n\n'
 
         "### POST /dependencies\n"
-        '`{"path": "src/lib"}` → internal imports, external packages, import graph · writes `dependencies-<slug>.md`\n\n'
+        '`{"path": "ascendvent/checkin/src/lib"}` → internal imports, external packages, import graph · writes `dependencies-<slug>.md`\n\n'
 
         "### POST /diff-summary\n"
         '`{"diff": "<git diff text>"}` → summary, risks, files_touched, test_recommendations · writes `diff-<hash>.md`\n'
@@ -339,7 +344,7 @@ async def setup():
         "```\n"
         "Task: Add rate limiting to the check-in API\n\n"
         "1. POST /context\n"
-        '   {"task": "Add rate limiting to check-in API", "paths": ["src/app/api","src/lib"], "focus": ["rate-limit","checkins","middleware"]}\n\n'
+        '   {"task": "Add rate limiting to check-in API", "paths": ["ascendvent/checkin/src/app/api","ascendvent/checkin/src/lib"], "focus": ["rate-limit","checkins","middleware"]}\n\n'
         "2. Read ./ai-context/context-bundle.md\n"
         "   → summary: rate limiting not yet implemented\n"
         "   → suggested_files: src/app/api/checkins/route.ts, src/middleware.ts\n\n"
@@ -375,6 +380,8 @@ async def scan(req: ScanRequest):
     Scan a directory. Walk files → extract deps → one model synthesis call.
     Writes: /output/scan-{slug}.md
     """
+    t0 = time.monotonic()
+    log.debug("POST /scan path=%s", req.path or "/")
     base = safe_resolve(req.path) if req.path else config.REPO_ROOT
     if not base.exists():
         raise HTTPException(status_code=404, detail=f"Path not found: {req.path!r}")
@@ -389,6 +396,7 @@ async def scan(req: ScanRequest):
         dependencies=result["dependencies"],
     )
 
+    log.debug("POST /scan done files=%d dur=%.2fs", len(result["files"]), time.monotonic() - t0)
     return {
         "path":         req.path,
         "files":        result["files"],
@@ -407,6 +415,8 @@ async def find(req: FindRequest):
     Grep the repo for query terms. One model synthesis call on top matches.
     Writes: /output/find-{slug}.md
     """
+    t0 = time.monotonic()
+    log.debug("POST /find query=%r path=%s", req.query, req.path or "/")
     matches = find_in_repo(req.query, req.path, max_results=config.MAX_SNIPPETS_PER_QUERY)
 
     # Build snippet block from top matches
@@ -439,6 +449,7 @@ In 2-3 sentences: where is "{req.query}" implemented and what are the key files?
         synthesis=synthesis,
     )
 
+    log.debug("POST /find done matches=%d dur=%.2fs", len(matches), time.monotonic() - t0)
     return {
         "query":      req.query,
         "path":       req.path,
@@ -456,6 +467,8 @@ async def routes():
     Extract all Next.js routes. Deterministic + one model analysis call.
     Writes: /output/routes.md
     """
+    t0 = time.monotonic()
+    log.debug("POST /routes")
     routes_data = extract_routes()
 
     api_routes = routes_data["api_routes"]
@@ -489,6 +502,7 @@ async def routes():
         routes_data["page_routes"]
     ))
 
+    log.debug("POST /routes done api=%d pages=%d dur=%.2fs", len(routes_data["api_routes"]), len(routes_data["page_routes"]), time.monotonic() - t0)
     return {
         "routes":         all_routes,
         "api_routes":     [r["path"] for r in routes_data["api_routes"]],
@@ -507,8 +521,11 @@ async def dependencies(req: DependenciesRequest):
     Map all imports and dependencies. Purely deterministic — no model call.
     Writes: /output/dependencies-{slug}.md
     """
+    t0 = time.monotonic()
+    log.debug("POST /dependencies path=%s", req.path or "/")
     dep_data = map_dependencies(req.path)
     written  = mw.write_dependencies(req.path, dep_data)
+    log.debug("POST /dependencies done dur=%.2fs", time.monotonic() - t0)
 
     return {
         "path":       req.path,
@@ -527,6 +544,8 @@ async def summarize(req: SummarizeRequest):
     Summarize a single file: purpose, deps, risks, architectural notes.
     Writes: /output/summary-{slug}.md
     """
+    t0 = time.monotonic()
+    log.debug("POST /summarize file=%s", req.file)
     f = safe_resolve(req.file)
     if not f.exists() or not f.is_file():
         raise HTTPException(status_code=404, detail=f"File not found: {req.file!r}")
@@ -563,6 +582,7 @@ Respond with exactly:
 
     written = mw.write_summary(req.file, purpose, deps[:30], risks, arch_notes)
 
+    log.debug("POST /summarize done dur=%.2fs", time.monotonic() - t0)
     return {
         "file":               req.file,
         "purpose":            purpose,
@@ -586,6 +606,8 @@ async def context(req: ContextRequest):
 
     Writes: /output/context-bundle.md
     """
+    t0 = time.monotonic()
+    log.debug("POST /context task=%r paths=%s", req.task, req.paths)
     result = await build_context(
         task=req.task,
         paths=req.paths,
@@ -601,6 +623,7 @@ async def context(req: ContextRequest):
         vector_hits=result["vector_hits"],
     )
 
+    log.debug("POST /context done files=%d vector_hits=%d dur=%.2fs", len(result["files"]), len(result["vector_hits"]), time.monotonic() - t0)
     return {
         "task":            req.task,
         "files":           result["files"],
@@ -620,6 +643,8 @@ async def diff_summary(req: DiffRequest):
     Summarize a git diff: changes, risks, test recommendations.
     Writes: /output/diff-{hash}.md
     """
+    t0 = time.monotonic()
+    log.debug("POST /diff-summary diff_len=%d", len(req.diff))
     result  = await review_diff(req.diff)
     written = mw.write_diff(
         summary=result["summary"],
@@ -628,6 +653,7 @@ async def diff_summary(req: DiffRequest):
         test_recs=result["test_recommendations"],
     )
 
+    log.debug("POST /diff-summary done files=%d dur=%.2fs", len(result["files_touched"]), time.monotonic() - t0)
     return {
         "summary":              result["summary"],
         "risks":                result["risks"],
@@ -647,9 +673,12 @@ async def vector_search(req: VectorSearchRequest):
     Degrades gracefully if vectors not available.
     Writes: /output/vector-{slug}.md
     """
+    t0 = time.monotonic()
+    log.debug("POST /vector-search query=%r limit=%d", req.query, req.limit)
     available = await supabase_vector.is_available()
 
     if not available:
+        log.debug("POST /vector-search skipped — vector store not available")
         return {
             "query":      req.query,
             "matches":    [],
@@ -659,6 +688,7 @@ async def vector_search(req: VectorSearchRequest):
 
     embedding = await ollama_client.embed(req.query)
     if embedding is None:
+        log.warning("POST /vector-search embed failed query=%r", req.query)
         return {
             "query":      req.query,
             "matches":    [],
@@ -669,6 +699,7 @@ async def vector_search(req: VectorSearchRequest):
     matches  = await supabase_vector.search(embedding, limit=req.limit)
     written  = mw.write_vector_results(req.query, matches)
 
+    log.debug("POST /vector-search done matches=%d dur=%.2fs", len(matches), time.monotonic() - t0)
     return {
         "query":      req.query,
         "matches":    matches,
@@ -742,8 +773,10 @@ async def index(req: IndexRequest):
                         errors += 1
 
         except Exception as e:
+            log.warning("index error path=%s: %s", path, e)
             errors += 1
 
+    log.debug("POST /index done indexed=%d skipped=%d errors=%d", indexed, skipped, errors)
     written = mw.write_index_report(req.paths, indexed, skipped, errors)
 
     return {

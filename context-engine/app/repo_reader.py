@@ -8,6 +8,7 @@ No writes. No follows outside REPO_ROOT.
 from pathlib import Path
 from fastapi import HTTPException
 from . import config
+from .logger import log
 
 
 def safe_resolve(rel_path: str) -> Path:
@@ -16,8 +17,7 @@ def safe_resolve(rel_path: str) -> Path:
     Raises HTTP 400 if the path would escape REPO_ROOT (path traversal guard).
     """
     p = (config.REPO_ROOT / rel_path.lstrip("/")).resolve()
-    repo_str = str(config.REPO_ROOT)
-    if not str(p).startswith(repo_str):
+    if not p.is_relative_to(config.REPO_ROOT.resolve()):
         raise HTTPException(
             status_code=400,
             detail=f"Path traversal rejected: {rel_path!r}"
@@ -63,8 +63,8 @@ def walk_repo(base: Path, extensions: set[str] | None = None) -> list[Path]:
                 and not is_never_index(item)
             ):
                 results.append(item)
-    except PermissionError:
-        pass
+    except PermissionError as e:
+        log.debug("walk permission denied base=%s: %s", base, e)
     return results
 
 
@@ -77,7 +77,8 @@ def read_file(path: Path, max_bytes: int | None = None) -> str:
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             return f.read(limit)
-    except Exception:
+    except Exception as e:
+        log.debug("read_file failed path=%s: %s", path, e)
         return ""
 
 

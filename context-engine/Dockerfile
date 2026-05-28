@@ -13,4 +13,4 @@ COPY app/ ./app/
 EXPOSE 8088
 
 # Single worker — prevents concurrent model calls from competing for 8GB RAM
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8088", "--workers", "1"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8088", "--workers", "1", "--log-level", "warning"]

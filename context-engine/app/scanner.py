@@ -5,11 +5,13 @@ Deterministic first: walk, read, extract imports.
 Model call last: one synthesis call on the collected snippet block.
 """
 
+import time
 from pathlib import Path
 from . import config
 from .repo_reader import walk_repo, read_file, rel_path, safe_resolve, build_snippet_block
 from .search_worker import extract_imports
 from . import ollama_client
+from .logger import log
 
 
 async def scan_directory(path: str = "") -> dict:
@@ -24,10 +26,13 @@ async def scan_directory(path: str = "") -> dict:
 
     Returns file list, summary, patterns, dependencies.
     """
+    t0 = time.monotonic()
     base = safe_resolve(path) if path else config.REPO_ROOT
+    log.debug("scan start path=%s max_files=%d", base, config.MAX_FILES_PER_SCAN)
 
     files = walk_repo(base)
     file_paths = [rel_path(f) for f in files]
+    log.debug("scan walk done files=%d dur=%.2fs", len(files), time.monotonic() - t0)
 
     # Collect snippets — cap at MAX_FILES_PER_SCAN
     snippets: list[tuple[str, str]] = []
@@ -65,6 +70,7 @@ Respond with exactly:
     summary  = parsed.get("summary",  raw[:300] if not parsed else "Could not parse model output")
     patterns = parsed.get("patterns", [])
 
+    log.debug("scan done path=%s files=%d dur=%.2fs", path or "/", len(file_paths), time.monotonic() - t0)
     return {
         "files":        file_paths,
         "snippets":     snippets,

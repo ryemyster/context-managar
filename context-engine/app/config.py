@@ -35,6 +35,9 @@ SUPABASE_MATCH_FUNCTION   = os.getenv("SUPABASE_MATCH_FUNCTION",   "match_code_e
 # Embedding dimensions for nomic-embed-text
 EMBED_DIMENSIONS = 768
 
+# ── Logging ────────────────────────────────────────────────────────────────────
+LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
+
 # ── Skip / filter rules ────────────────────────────────────────────────────────
 SKIP_DIRS: set[str] = {
     "node_modules", ".next", ".git", "dist", "build",

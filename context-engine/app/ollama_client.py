@@ -10,8 +10,10 @@ same request path. See architecture notes in README.
 """
 
 import json
+import time
 import httpx
 from . import config
+from .logger import log
 
 # Single shared client — connection reuse across requests
 _client: httpx.AsyncClient | None = None
@@ -33,6 +35,8 @@ async def generate(prompt: str) -> str:
     Returns response text. Never raises — returns error string on failure.
     Caller should check if response starts with "[" to detect errors.
     """
+    log.debug("ollama generate model=%s prompt_len=%d", config.OLLAMA_MODEL, len(prompt))
+    t0 = time.monotonic()
     try:
         r = await get_client().post(
             "/api/generate",
@@ -48,10 +52,14 @@ async def generate(prompt: str) -> str:
             },
         )
         r.raise_for_status()
-        return r.json().get("response", "").strip()
+        result = r.json().get("response", "").strip()
+        log.debug("ollama generate done dur=%.2fs response_len=%d", time.monotonic() - t0, len(result))
+        return result
     except httpx.TimeoutException:
+        log.warning("ollama generate timeout model=%s dur=%.2fs prompt_len=%d", config.OLLAMA_MODEL, time.monotonic() - t0, len(prompt))
         return "[timeout — prompt may be too long, try a smaller path]"
     except Exception as e:
+        log.error("ollama generate error: %s", e)
         return f"[model error: {e}]"
 
 
@@ -60,6 +68,8 @@ async def embed(text: str) -> list[float] | None:
     Generate an embedding vector using the embed model.
     Returns None on failure so callers can degrade gracefully.
     """
+    log.debug("ollama embed model=%s text_len=%d", config.OLLAMA_EMBED_MODEL, len(text))
+    t0 = time.monotonic()
     try:
         r = await get_client().post(
             "/api/embeddings",
@@ -70,8 +80,11 @@ async def embed(text: str) -> list[float] | None:
             timeout=90.0,   # nomic may need to swap in from qwen; allow time for model load
         )
         r.raise_for_status()
-        return r.json().get("embedding")
-    except Exception:
+        result = r.json().get("embedding")
+        log.debug("ollama embed done dur=%.2fs dims=%d", time.monotonic() - t0, len(result) if result else 0)
+        return result
+    except Exception as e:
+        log.warning("ollama embed failed dur=%.2fs: %s", time.monotonic() - t0, e)
         return None
 
 
@@ -81,8 +94,8 @@ async def list_models() -> list[str]:
         r = await get_client().get("/api/tags", timeout=5.0)
         if r.status_code == 200:
             return [m["name"] for m in r.json().get("models", [])]
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("ollama list_models failed: %s", e)
     return []
 
 

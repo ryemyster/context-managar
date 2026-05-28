@@ -16,6 +16,7 @@ import hashlib
 from typing import Any
 import httpx
 from . import config
+from .logger import log
 
 _client: httpx.AsyncClient | None = None
 _vector_ready: bool | None = None   # cached after first check
@@ -64,8 +65,10 @@ async def is_available() -> bool:
             headers=_headers(),
         )
         _vector_ready = r.status_code in (200, 206)
+        log.debug("supabase vector check status=%d ready=%s", r.status_code, _vector_ready)
         return _vector_ready
-    except Exception:
+    except Exception as e:
+        log.warning("supabase vector check failed: %s", e)
         _vector_ready = False
         return False
 
@@ -152,6 +155,7 @@ async def search(
     if client is None:
         return []
 
+    log.debug("supabase vector search limit=%d threshold=%.2f", limit, threshold)
     try:
         r = await client.post(
             f"/rest/v1/rpc/{config.SUPABASE_MATCH_FUNCTION}",
@@ -163,9 +167,11 @@ async def search(
             headers={**_headers(), "Prefer": ""},
         )
         if r.status_code == 200:
-            return r.json() or []
-    except Exception:
-        pass
+            results = r.json() or []
+            log.debug("supabase vector search done hits=%d", len(results))
+            return results
+    except Exception as e:
+        log.warning("supabase vector search failed: %s", e)
     return []
 
 
