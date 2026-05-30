@@ -122,7 +122,7 @@ Vector features degrade gracefully if this step is skipped.
 ```bash
 bash scripts/start-context.sh
 # or directly:
-docker compose -f docker-compose.context.yml up -d --build
+docker compose up -d --build
 ```
 
 ### 5. Verify
@@ -408,7 +408,7 @@ The `tips` field maps each failure to its fix.
 ## Stopping
 
 ```bash
-docker compose -f docker-compose.context.yml down
+docker compose down
 ```
 
 founderos-ollama and Supabase continue running normally.

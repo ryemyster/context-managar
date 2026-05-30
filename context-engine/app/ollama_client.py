@@ -1,8 +1,9 @@
 """
 ollama_client.py — async Ollama HTTP client.
 
-IMPORTANT: generate() uses qwen2.5-coder:3b (generation model).
-           embed() uses nomic-embed-text (embedding model).
+IMPORTANT: generate()           uses qwen2.5-coder:3b (code model).
+           generate_reasoning() uses qwen3.5:9b (reasoning model).
+           embed()              uses nomic-embed-text (embedding model).
 
 With OLLAMA_MAX_LOADED_MODELS=1, calling generate() after embed()
 (or vice versa) causes a model swap (~5-10s). Never call both in the
@@ -50,6 +51,7 @@ async def generate(prompt: str) -> str:
                     "num_ctx":       config.OLLAMA_NUM_CTX,
                 },
             },
+            timeout=config.OLLAMA_TIMEOUT,
         )
         r.raise_for_status()
         result = r.json().get("response", "").strip()
@@ -60,6 +62,41 @@ async def generate(prompt: str) -> str:
         return "[timeout — prompt may be too long, try a smaller path]"
     except Exception as e:
         log.error("ollama generate error: %s", e)
+        return f"[model error: {e}]"
+
+
+async def generate_reasoning(prompt: str) -> str:
+    """
+    Call Ollama /api/generate with the reasoning model (qwen3.5:9b).
+    Use for higher-level architectural analysis, not hot-path code tasks.
+    Returns error string on failure — caller checks for leading "[".
+    """
+    log.debug("ollama reasoning model=%s prompt_len=%d", config.OLLAMA_REASON_MODEL, len(prompt))
+    t0 = time.monotonic()
+    try:
+        r = await get_client().post(
+            "/api/generate",
+            json={
+                "model":  config.OLLAMA_REASON_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature":   0.2,
+                    "num_predict":   config.OLLAMA_REASON_PREDICT,
+                    "num_ctx":       config.OLLAMA_NUM_CTX,
+                },
+            },
+            timeout=config.OLLAMA_REASON_TIMEOUT,
+        )
+        r.raise_for_status()
+        result = r.json().get("response", "").strip()
+        log.debug("ollama reasoning done dur=%.2fs response_len=%d", time.monotonic() - t0, len(result))
+        return result
+    except httpx.TimeoutException:
+        log.warning("ollama reasoning timeout model=%s dur=%.2fs", config.OLLAMA_REASON_MODEL, time.monotonic() - t0)
+        return "[timeout — reasoning prompt may be too long, try a smaller path]"
+    except Exception as e:
+        log.error("ollama reasoning error: %s", e)
         return f"[model error: {e}]"
 
 

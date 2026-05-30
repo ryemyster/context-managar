@@ -7,11 +7,16 @@ for a specific Claude task.
 Order of operations (IMPORTANT for memory safety):
 1. Deterministic: scan paths, grep focus terms, extract routes
 2. Vector: embed query + search Supabase (uses nomic-embed-text)
-3. Generation: ONE synthesis call (uses qwen2.5-coder:3b)
+3. Code model: ONE synthesis call (uses qwen2.5-coder:3b)
 
 Steps 2 and 3 use different models. With MAX_LOADED_MODELS=1,
-there will be a model swap between them (~5-10s). Acceptable.
+there will be a model swap between them (~1-2s for 3b). Acceptable.
 Never interleave embed and generate calls.
+
+Code model is used here (not reasoning) because:
+- "What files are relevant to this task" = pattern matching, not judgment
+- After nomic embed, 3b loads in ~1-2s vs 9b loads in 2-3 min (Docker)
+- /diff-summary is the right home for the reasoning model (risk analysis)
 """
 
 from pathlib import Path
@@ -26,6 +31,7 @@ async def build_context(
     task: str,
     paths: list[str],
     focus: list[str],
+    use_vector: bool = False,
 ) -> dict:
     """
     Build a comprehensive context bundle for a Claude task.
@@ -70,9 +76,11 @@ async def build_context(
                 except Exception:
                     pass
 
-    # ── 3. Vector search (uses nomic-embed-text — different model than generation) ──
+    # ── 3. Vector search — opt-in only (adds embed + model-swap latency) ────────
+    # Disabled by default. Pass use_vector=True only after /index has been run
+    # and you want semantic hits in addition to grep matches.
     vector_hits: list[dict] = []
-    if focus and await supabase_vector.is_available():
+    if use_vector and focus and await supabase_vector.is_available():
         embed_query = f"{task} {' '.join(focus)}"
         embedding = await ollama_client.embed(embed_query)
         if embedding:
@@ -96,7 +104,7 @@ async def build_context(
         all_files[:20]
     ))
 
-    # ── 5. ONE model call — synthesis only (uses qwen2.5-coder:3b) ───────────
+    # ── 5. ONE code model call — synthesis only (uses qwen2.5-coder:3b) ─────
     focus_str = ", ".join(focus) if focus else "general"
     prompt = f"""Task: {task}
 Focus areas: {focus_str}

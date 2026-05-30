@@ -7,14 +7,17 @@ import os
 from pathlib import Path
 
 # ── Ollama ─────────────────────────────────────────────────────────────────────
-OLLAMA_HOST        = os.getenv("OLLAMA_HOST",        "http://founderos-ollama:11434")
-OLLAMA_MODEL       = os.getenv("OLLAMA_MODEL",       "qwen2.5-coder:3b")
-OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+OLLAMA_HOST         = os.getenv("OLLAMA_HOST",         "http://founderos-ollama:11434")
+OLLAMA_MODEL        = os.getenv("OLLAMA_MODEL",        "qwen2.5-coder:3b")
+OLLAMA_REASON_MODEL = os.getenv("OLLAMA_REASON_MODEL", "qwen3.5:9b")
+OLLAMA_EMBED_MODEL  = os.getenv("OLLAMA_EMBED_MODEL",  "nomic-embed-text")
 
-# Inference settings — tuned for 4096 ctx window on CPU
-OLLAMA_TIMEOUT     = 180.0   # seconds; 3b on CPU can take 60-90s for full response
-OLLAMA_NUM_CTX     = 2048    # explicit ctx window — prevents Ollama from guessing large
-OLLAMA_NUM_PREDICT = 400     # max output tokens per call
+# Inference settings — tuned for 3b code model (~3.6s) / 9b reasoning on M3 16GB
+OLLAMA_TIMEOUT        = 120.0   # seconds; 3b on M3 completes in ~3-15s typical
+OLLAMA_REASON_TIMEOUT = 600.0   # reasoning model cold-load + generation on M3 Docker can take 3-5 min
+OLLAMA_NUM_CTX        = 4096    # 3b at 4096 ctx = ~2.4GB total — fine on 16GB M3
+OLLAMA_NUM_PREDICT    = 400     # max output tokens for code model
+OLLAMA_REASON_PREDICT = 1024    # reasoning model needs room for chain-of-thought
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 REPO_ROOT  = Path(os.getenv("REPO_ROOT",   "/repo")).resolve()
@@ -36,7 +39,10 @@ SUPABASE_MATCH_FUNCTION   = os.getenv("SUPABASE_MATCH_FUNCTION",   "match_code_e
 EMBED_DIMENSIONS = 768
 
 # ── Logging ────────────────────────────────────────────────────────────────────
-LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
+LOG_LEVEL  = os.getenv("LOG_LEVEL",  "INFO").upper()
+LOG_FORMAT = os.getenv("LOG_FORMAT", "text").lower()   # "text" or "json"
+
+SLOW_REQUEST_MS = int(os.getenv("SLOW_REQUEST_MS", "5000"))
 
 # ── Skip / filter rules ────────────────────────────────────────────────────────
 SKIP_DIRS: set[str] = {

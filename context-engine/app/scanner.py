@@ -49,20 +49,14 @@ async def scan_directory(path: str = "") -> dict:
 
     # Single model call
     file_list_str = "\n".join(file_paths[:25])
-    prompt = f"""Analyze this repository directory. Respond with JSON only — no markdown fences.
+    prompt = f"""Analyze this directory. Respond with JSON only — no markdown fences, no explanation.
 
 Directory: {path or "/"}
-Files:
-{file_list_str}
+Files: {file_list_str}
+Code: {snippet_block}
 
-Code samples:
-{snippet_block}
-
-Respond with exactly:
-{{
-  "summary": "2-3 sentences: what this code does and its purpose",
-  "patterns": ["pattern1", "pattern2", "pattern3"]
-}}"""
+Respond with exactly this structure:
+{{"summary":"2-3 sentences on what this code does","patterns":["pattern1","pattern2"]}}"""
 
     raw = await ollama_client.generate(prompt)
     parsed = ollama_client.parse_json_response(raw)

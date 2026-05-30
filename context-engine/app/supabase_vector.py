@@ -144,7 +144,7 @@ async def upsert_chunk(
 async def search(
     query_embedding: list[float],
     limit: int = 8,
-    threshold: float = 0.6,
+    threshold: float = 0.3,
 ) -> list[dict[str, Any]]:
     """
     Run vector similarity search via Supabase RPC.

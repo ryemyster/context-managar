@@ -31,13 +31,19 @@ echo "✓ founderos-ollama running"
 MODELS=$(curl -s http://localhost:11434/api/tags | python3 -c "import json,sys; [print(m['name']) for m in json.load(sys.stdin)['models']]" 2>/dev/null || echo "")
 
 if echo "$MODELS" | grep -q "qwen2.5-coder:3b"; then
-  echo "✓ qwen2.5-coder:3b available"
+  echo "✓ qwen2.5-coder:3b available (code model)"
 else
   echo "⚠  qwen2.5-coder:3b not found. Run: bash scripts/pull-model.sh"
 fi
 
+if echo "$MODELS" | grep -q "qwen3"; then
+  echo "✓ qwen3.5:9b available (reasoning model)"
+else
+  echo "⚠  qwen3.5:9b not found. Run: ollama pull qwen3.5:9b"
+fi
+
 if echo "$MODELS" | grep -q "nomic-embed-text"; then
-  echo "✓ nomic-embed-text available"
+  echo "✓ nomic-embed-text available (embedding model)"
 else
   echo "⚠  nomic-embed-text not found. Run: bash scripts/pull-model.sh"
 fi
@@ -53,7 +59,7 @@ fi
 echo ""
 echo "→ Building and starting context-engine..."
 cd "$ROOT"
-docker compose -f docker-compose.context.yml up -d --build
+docker compose up -d --build
 
 echo ""
 echo "→ Waiting for health check (up to 40s)..."

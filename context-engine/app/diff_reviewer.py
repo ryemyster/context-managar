@@ -2,7 +2,8 @@
 diff_reviewer.py — git diff analysis.
 
 Deterministic: extracts touched files from diff headers.
-Model: one call for summary, risks, test recommendations.
+Model: one reasoning call (qwen3.5:9b) for summary, risks, test recommendations.
+Risk analysis and test recommendations are judgment — not code pattern matching.
 """
 
 import re
@@ -46,7 +47,7 @@ Respond with exactly:
   "test_recommendations": ["what to verify", "..."]
 }}"""
 
-    raw    = await ollama_client.generate(prompt)
+    raw    = await ollama_client.generate_reasoning(prompt)
     parsed = ollama_client.parse_json_response(raw)
 
     return {

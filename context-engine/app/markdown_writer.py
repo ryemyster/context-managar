@@ -287,6 +287,46 @@ _Generated: {ts()}_
     return write(f"vector-{slug}.md", content)
 
 
+def write_draft(file: str, task: str, mode: str, code: str) -> str:
+    import re
+    slug = re.sub(r"[^a-z0-9]+", "-", file.lower().replace("/", "-"))[:50]
+    ext  = Path(file).suffix or ".txt"
+    content = f"""# Draft: `{file}`
+_Task: {task}_
+_Generated: {ts()} — Mode: {mode} — Model: {config.OLLAMA_MODEL}_
+
+## Generated Code
+```{ext.lstrip(".")}
+{code}
+```
+
+---
+**Claude: review this draft before applying. You own the write — qwen owns the generation.**
+**Verify:** types, imports, edge cases, security boundaries. Edit inline before applying.
+"""
+    return write(f"draft-{slug}.md", content)
+
+
+def write_scaffold_file(file: str, task: str, spec: str, mode: str, code: str) -> str:
+    import re
+    slug = re.sub(r"[^a-z0-9]+", "-", file.lower().replace("/", "-"))[:50]
+    ext  = Path(file).suffix or ".txt"
+    content = f"""# Scaffold: `{file}`
+_Task: {task}_
+_Spec: {spec}_
+_Generated: {ts()} — Mode: {mode} — Model: {config.OLLAMA_MODEL}_
+
+## Generated Code
+```{ext.lstrip(".")}
+{code}
+```
+
+---
+**Claude: review before applying. Check types, imports, edge cases. You own the write.**
+"""
+    return write(f"scaffold-{slug}.md", content)
+
+
 def write_index_report(paths: list[str], indexed: int, skipped: int, errors: int) -> str:
     content = f"""# Index Report
 _Generated: {ts()}_

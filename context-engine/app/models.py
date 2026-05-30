@@ -25,6 +25,7 @@ class ContextRequest(BaseModel):
     task: str
     paths: list[str] = ["."]
     focus: list[str] = []
+    use_vector: bool = False   # opt-in — adds embed+model swap latency; only useful after /index
 
 class DiffRequest(BaseModel):
     diff: str
@@ -32,15 +33,34 @@ class DiffRequest(BaseModel):
 class VectorSearchRequest(BaseModel):
     query: str
     limit: int = 8
+    threshold: float = 0.3   # cosine similarity floor; prose/markdown typically 0.2-0.5, code 0.5-0.8
 
 class IndexRequest(BaseModel):
     paths: list[str] = ["."]
     force: bool = False
 
+class DraftRequest(BaseModel):
+    task: str                           # what to implement — be specific
+    file: str                           # target file path (relative to REPO_ROOT)
+    context_files: list[str] = []       # additional files to read for context
+    mode: str = "edit"                  # "create" | "edit"
+
+class ScaffoldFile(BaseModel):
+    file: str                           # target file path (relative to REPO_ROOT)
+    spec: str                           # what this specific file should do
+    mode: str = "create"                # "create" | "edit"
+
+class ScaffoldRequest(BaseModel):
+    task: str                           # overall feature or task description
+    files: list[ScaffoldFile]           # ordered list of files to generate
+    context_files: list[str] = []       # shared reference files for all generations
+
 
 # ── Responses ──────────────────────────────────────────────────────────────────
 
 class HealthResponse(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
     status: str
     ollama: bool
     ollama_host: str
@@ -120,3 +140,21 @@ class IndexResponse(BaseModel):
     errors: int
     available: bool
     written_to: str
+
+class DraftResponse(BaseModel):
+    file: str
+    mode: str
+    code: str
+    written_to: str
+
+class ScaffoldFileResult(BaseModel):
+    file: str
+    mode: str
+    code: str
+    written_to: str
+
+class ScaffoldResponse(BaseModel):
+    task: str
+    files: list[ScaffoldFileResult]
+    total: int
+    errors: list[str]

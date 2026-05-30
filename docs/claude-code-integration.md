@@ -50,7 +50,7 @@ REPO_PATH=/path/to/your/project
 Then restart (no rebuild needed):
 ```bash
 cd ~/Repos/ryemyster/local-model
-docker compose -f docker-compose.context.yml up -d
+docker compose up -d
 ```
 
 Verify:
@@ -154,7 +154,7 @@ cd ~/Repos/ryemyster/local-model
 sed -i '' 's|^REPO_PATH=.*|REPO_PATH=/path/to/other-project|' .env
 
 # Restart (no rebuild needed)
-docker compose -f docker-compose.context.yml up -d
+docker compose up -d
 
 # Verify the new repo is mounted
 curl http://localhost:8088/healthcheck
@@ -236,11 +236,11 @@ The `tips` field in `/debug` maps each failure to its fix. Below is the quick re
 
 **Wrong repo being scanned**
 - Check `repo_root` in `/health` or `/debug`
-- Update `REPO_PATH` in `.env` → `docker compose -f docker-compose.context.yml up -d`
+- Update `REPO_PATH` in `.env` → `docker compose up -d`
 
 **`supabase_key_set: false` in /debug**
 - `.env` still has placeholder key — get real key from Supabase Studio → Settings → API → `service_role`
 
 **Port 8088 taken**
 - `docker ps | grep 8088` — stop the conflicting container first
-- `docker compose -f docker-compose.context.yml down && docker compose -f docker-compose.context.yml up -d`
+- `docker compose down && docker compose up -d`

@@ -12,17 +12,35 @@ Hard rules enforced here:
 """
 
 import time
-from fastapi import FastAPI, HTTPException
+import traceback
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from . import config
 from . import ollama_client, supabase_vector
 from .logger import log
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    log.info("context-engine starting")
+    log.info("  repo_root=%s", config.REPO_ROOT)
+    log.info("  ollama=%s  model=%s", config.OLLAMA_HOST, config.OLLAMA_MODEL)
+    log.info("  reason_model=%s", config.OLLAMA_REASON_MODEL)
+    log.info("  embed_model=%s", config.OLLAMA_EMBED_MODEL)
+    log.info("  supabase=%s", config.SUPABASE_URL or "not configured")
+    log.info("  log_level=%s", config.LOG_LEVEL)
+    log.info("context-engine ready on :8088")
+    yield
+    log.info("context-engine shutting down")
 from . import markdown_writer as mw
 from .models import (
     ScanRequest, FindRequest, DependenciesRequest, SummarizeRequest,
-    ContextRequest, DiffRequest, VectorSearchRequest, IndexRequest,
+    ContextRequest, DiffRequest, VectorSearchRequest, IndexRequest, DraftRequest, ScaffoldRequest,
     HealthResponse, ScanResponse, FindResponse, RoutesResponse,
     DependenciesResponse, SummarizeResponse, ContextResponse,
-    DiffResponse, VectorSearchResponse, IndexResponse,
+    DiffResponse, VectorSearchResponse, IndexResponse, DraftResponse, ScaffoldResponse, ScaffoldFileResult,
 )
 from .repo_reader import safe_resolve, read_file, rel_path, walk_repo, build_snippet_block
 from .search_worker import find_in_repo, extract_imports
@@ -36,7 +54,28 @@ app = FastAPI(
     title="context-engine",
     version="1.0.0",
     description="Local AI context layer for Claude Code. Scout, not engineer.",
+    lifespan=lifespan,
 )
+
+
+class _RequestLog(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        t0 = time.monotonic()
+        try:
+            response = await call_next(request)
+        except Exception:
+            dur = time.monotonic() - t0
+            log.error("%s %s unhandled %.3fs\n%s",
+                      request.method, request.url.path, dur, traceback.format_exc())
+            return JSONResponse(status_code=500, content={"detail": "internal server error"})
+        dur = time.monotonic() - t0
+        ms  = dur * 1000
+        lvl = log.warning if (response.status_code >= 500 or ms > config.SLOW_REQUEST_MS) else log.info
+        lvl("%s %s %d %.0fms", request.method, request.url.path, response.status_code, ms)
+        return response
+
+
+app.add_middleware(_RequestLog)
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────
@@ -48,33 +87,36 @@ async def health():
     Use /healthcheck for monitoring (returns 503 when critical services are down).
     """
     models         = await ollama_client.list_models()
-    model_ok       = any(config.OLLAMA_MODEL in m for m in models)
-    embed_ok       = any(config.OLLAMA_EMBED_MODEL in m for m in models)
+    model_ok       = any(config.OLLAMA_MODEL        in m for m in models)
+    reason_ok      = any(config.OLLAMA_REASON_MODEL in m for m in models)
+    embed_ok       = any(config.OLLAMA_EMBED_MODEL  in m for m in models)
     supabase_ok    = await supabase_vector.is_supabase_reachable()
     vector_ok      = await supabase_vector.is_available()
     repo_mounted   = config.REPO_ROOT.exists() and config.REPO_ROOT.is_dir()
 
-    # Degraded = can still scan/find/summarize (qwen works) but vector is down
-    # Critical = Ollama or repo not reachable — nothing will work
+    # Degraded = can still scan/find/summarize but vector or reasoning is down
+    # Critical = code model or repo not reachable — nothing will work
     critical = model_ok and repo_mounted
-    status = "ok" if (critical and supabase_ok) else ("degraded" if critical else "critical")
+    status = "ok" if (critical and reason_ok and supabase_ok) else ("degraded" if critical else "critical")
 
     return {
-        "status":               status,
-        "ollama":               len(models) > 0,
-        "ollama_host":          config.OLLAMA_HOST,
-        "model":                config.OLLAMA_MODEL,
-        "model_available":      model_ok,
-        "embed_model":          config.OLLAMA_EMBED_MODEL,
-        "embed_model_available": embed_ok,
-        "available_models":     models,
-        "supabase":             supabase_ok,
-        "vector_ready":         vector_ok,
-        "supabase_url":         config.SUPABASE_URL or "not configured",
-        "vector_table":         config.SUPABASE_VECTOR_TABLE,
-        "repo_mounted":         repo_mounted,
-        "repo_root":            str(config.REPO_ROOT),
-        "output_dir":           str(config.OUTPUT_DIR),
+        "status":                 status,
+        "ollama":                 len(models) > 0,
+        "ollama_host":            config.OLLAMA_HOST,
+        "code_model":             config.OLLAMA_MODEL,
+        "code_model_available":   model_ok,
+        "reason_model":           config.OLLAMA_REASON_MODEL,
+        "reason_model_available": reason_ok,
+        "embed_model":            config.OLLAMA_EMBED_MODEL,
+        "embed_model_available":  embed_ok,
+        "available_models":       models,
+        "supabase":               supabase_ok,
+        "vector_ready":           vector_ok,
+        "supabase_url":           config.SUPABASE_URL or "not configured",
+        "vector_table":           config.SUPABASE_VECTOR_TABLE,
+        "repo_mounted":           repo_mounted,
+        "repo_root":              str(config.REPO_ROOT),
+        "output_dir":             str(config.OUTPUT_DIR),
     }
 
 
@@ -195,7 +237,7 @@ async def debug():
         "tips": {
             "no_vector_results":   "Run /index first. Check vector_row_count > 0. embed timeout is 90s — retry after qwen unloads.",
             "model_timeout":       "Scope your path. Try /scan on src/app/api not /scan on . (root).",
-            "wrong_repo":          "Update REPO_PATH in .env and restart: docker compose -f docker-compose.context.yml up -d",
+            "wrong_repo":          "Set HOME in .env and restart: docker compose up -d --build",
             "model_swap_slowness": "After /context, qwen is loaded. /vector-search needs ~10-30s to swap in nomic. Built-in 90s timeout handles it.",
             "ollama_unreachable":  "Check founderos-ollama is running: docker inspect founderos-ollama",
             "supabase_401":        "SUPABASE_SERVICE_ROLE_KEY is wrong or placeholder. Get it from Supabase Studio → Settings → API.",
@@ -220,155 +262,201 @@ async def setup():
     repo     = str(config.REPO_ROOT)
     base     = "http://localhost:8088"
 
-    gen_status = "available" if model_ok else "OFFLINE — skip generation endpoints"
-    emb_status = "available" if embed_ok else "OFFLINE — skip /index and /vector-search"
-    vec_status = "ready — semantic search available" if vec_ok else "not indexed — /vector-search returns empty; use /find"
+    reason_ok  = any(config.OLLAMA_REASON_MODEL in m for m in models)
+    gen_status    = "available" if model_ok  else "OFFLINE — skip /draft /scaffold /scan /find /summarize"
+    reason_status = "available" if reason_ok else "OFFLINE — /context and /diff-summary will degrade"
+    emb_status    = "available" if embed_ok  else "OFFLINE — skip /index and /vector-search"
+    vec_status    = "ready" if vec_ok else "not indexed — run /index first; /vector-search returns empty until then"
 
     return (
         "# context-engine — Agent Integration Protocol\n"
-        "> You are an AI agent tool. This service is your local context scout.\n"
-        "> To load this document: run `curl -s http://localhost:8088/setup` in your terminal, or ask Claude to run it via Bash.\n"
+        "> You are an AI agent. This service is your local context scout and code delegation layer.\n"
+        "> To load this document: `curl -s http://localhost:8088/setup`\n"
         "> Do not ask the user to explain the codebase — call the scout instead.\n"
         "\n---\n\n"
 
-        "## What this service is\n\n"
-        "context-engine is a read-only local AI context layer. It owns all mechanical repo work\n"
-        "so agents spend tokens on judgment, not recall.\n\n"
-        "```\n"
-        "Local tokens  →  recall  (scanning, searching, summarizing, indexing)\n"
-        "Agent tokens  →  judgment (planning, architecture, implementation, decisions)\n"
-        "```\n\n"
-        "| This service owns       | You (the agent) own   |\n"
-        "|-------------------------|-----------------------|\n"
-        "| repo scanning           | planning              |\n"
-        "| deterministic search    | architecture          |\n"
-        "| file summaries          | implementation        |\n"
-        "| dependency mapping      | code edits            |\n"
-        "| route extraction        | migrations            |\n"
-        "| context bundles         | PR review             |\n"
-        "| diff summaries          | security review       |\n"
-        "| vector retrieval        | final decisions       |\n\n"
+        "## What this service does\n\n"
+        "Three jobs, in priority order:\n\n"
+        "1. **Retrieval** — finds relevant files and code without burning your token budget on recall\n"
+        "2. **Reasoning synthesis** — uses a local reasoning model to judge what matters and what's risky\n"
+        "3. **Code delegation** — lets you hand off mechanical code generation to a local code model\n\n"
+        "You own all planning, architecture, security decisions, and every file write.\n\n"
         "**Hard constraint:** this service never writes to the repo. All output goes to `./ai-context/` as Markdown.\n\n"
-        f"**Path convention:** `REPO_ROOT` is `{repo}` (your `~/Repos` directory). All `path` parameters must be\n"
-        "prefixed with `<owner>/<repo-name>/` — e.g. `\"ryemyster/local-model/src\"`. A bare `\".\"` scans\n"
-        "**all** of `~/Repos` which is never what you want. Always scope to a specific repo.\n"
+        f"**Path convention:** `REPO_ROOT` is `{repo}`. All `path` parameters must be prefixed with "
+        "`<owner>/<repo>/` — e.g. `\"ascendvent/checkin-ascendvent/src\"`. Never use bare `\".\"` — it scans all of `~/Repos`.\n"
         "\n---\n\n"
 
-        "## Live capabilities\n\n"
+        "## Three-model stack\n\n"
+        "| Model | Role | Called by |\n"
+        "|-------|------|-----------|\n"
+        f"| `{config.OLLAMA_REASON_MODEL}` | Reasoning — judgment, risks, what matters | `/diff-summary` |\n"
+        f"| `{config.OLLAMA_MODEL}` | Code — pattern matching, generation, summarisation | `/context`, `/draft`, `/scaffold`, `/scan`, `/find`, `/summarize` |\n"
+        f"| `{config.OLLAMA_EMBED_MODEL}` | Embeddings — semantic search only, no generation | `/index`, `/vector-search`, `/context` |\n\n"
+        "**Why the split matters:**\n"
+        "- `/diff-summary` uses the reasoning model — risk analysis and test recommendations are judgment.\n"
+        "- `/context` uses the code model — relevance scoring is pattern matching, not reasoning. "
+        "Also avoids a slow 9b cold-load after the embed step.\n"
+        "- `/draft` and `/scaffold` use the code model because generating code from a clear spec "
+        "is pattern matching, not reasoning.\n"
+        "- You (Claude Code) are the SR dev. The code model is the JR dev. "
+        "You plan, delegate, review, and apply — it types.\n"
+        "\n---\n\n"
+
+        "## Live status\n\n"
         "| Capability | Status |\n"
         "|---|---|\n"
-        f"| Text generation (scan/find/summarize/context/diff) | {gen_status} |\n"
-        f"| Embeddings + vector search | {emb_status} |\n"
-        f"| Semantic search (indexed chunks) | {vec_status} |\n"
-        f"| Repo being scanned | `{repo}` |\n"
+        f"| Reasoning model (`{config.OLLAMA_REASON_MODEL}`) | {reason_status} |\n"
+        f"| Code model (`{config.OLLAMA_MODEL}`) | {gen_status} |\n"
+        f"| Embeddings (`{config.OLLAMA_EMBED_MODEL}`) | {emb_status} |\n"
+        f"| Vector index | {vec_status} |\n"
+        f"| Repo | `{repo}` |\n"
         "\n---\n\n"
 
         "## Decision rules\n\n"
         "| Situation | Call |\n"
         "|---|---|\n"
-        "| Starting any non-trivial task | `POST /context` — full bundle, always start here |\n"
-        "| Need to know what is in a directory | `POST /scan` |\n"
+        "| Starting any non-trivial task | `POST /context` — always start here |\n"
+        "| Need to know what's in a directory | `POST /scan` |\n"
         "| Need to find where a concept lives | `POST /find` |\n"
         "| Need all routes in a Next.js app | `POST /routes` |\n"
         "| Need to understand one specific file | `POST /summarize` |\n"
         "| Need the import graph of a path | `POST /dependencies` |\n"
-        "| Have a git diff to review | `POST /diff-summary` |\n"
+        "| Reviewing a git diff | `POST /diff-summary` |\n"
         "| Want semantically similar code chunks | `POST /vector-search` |\n"
-        "| Engine is unreachable | Proceed without it — never block on the scout |\n\n"
-        "**Skip the scout when:** the task is a one-liner, the files are already in context this session,\n"
-        f"or `{base}/healthcheck` returns non-200.\n"
+        "| One file to generate or edit — spec is clear | `POST /draft` — JR dev delegation |\n"
+        "| Feature spans multiple files — want to preserve context window | `POST /scaffold` — multi-file delegation |\n"
+        "| Novel architecture, security, complex logic | Claude only — do not delegate |\n"
+        "| Engine unreachable | Proceed without it — never block on the scout |\n\n"
+        f"**Skip when:** one-liner task, files already in context, or `{base}/healthcheck` returns non-200.\n\n"
+        f"**Troubleshoot:** `GET {base}/debug` — model state, vector row count, config. No model calls.\n"
         "\n---\n\n"
 
         "## Endpoint reference\n\n"
 
-        "### POST /context — use before every non-trivial task\n\n"
+        "### POST /context — use before every non-trivial task\n"
+        "Model: reasoning. Scans paths, greps focus terms, runs vector search, synthesises what matters.\n\n"
         "```json\n"
-        "{\n"
-        '  "task": "describe what you are about to implement",\n'
-        '  "paths": ["ryemyster/local-model/src", "ascendvent/checkin/src/app"],\n'
-        '  "focus": ["auth", "stripe", "relevant-terms"]\n'
-        "}\n"
-        "```\n\n"
-        "Response fields:\n"
-        "- `summary` — one-paragraph synthesis of what is relevant\n"
-        "- `files` — file inventory for the scoped paths\n"
-        "- `suggested_files` — files most likely relevant; verify these before editing\n"
-        "- `risks` — flags from the local model\n"
-        "- `vector_hits` — semantically similar chunks (empty if not indexed)\n"
-        "- `written_to` — path to `./ai-context/context-bundle.md`; read this file\n\n"
+        '{  "task": "add rate limiting to the check-in API",\n'
+        '   "paths": ["ascendvent/checkin-ascendvent/src/app/api", "ascendvent/checkin-ascendvent/src/lib"],\n'
+        '   "focus": ["rate-limit", "middleware", "checkins"]  }\n'
+        "```\n"
+        "Returns: `summary`, `suggested_files`, `risks`, `vector_hits`, `written_to` → read `context-bundle.md`\n\n"
 
         "### POST /scan\n"
-        '`{"path": "ryemyster/local-model/src/app/api"}` → file list, summary, patterns · writes `scan-<slug>.md`\n\n'
+        'Model: code. `{"path": "ascendvent/checkin-ascendvent/src/app/api"}` → file list, patterns · `scan-<slug>.md`\n\n'
 
         "### POST /find\n"
-        '`{"query": "stripe subscription enforcement", "path": "ascendvent/checkin/src"}` → matching files + synthesis · writes `find-<slug>.md`\n\n'
+        'Model: code. `{"query": "stripe enforcement", "path": "ascendvent/checkin-ascendvent/src"}` → matches + synthesis · `find-<slug>.md`\n\n'
 
         "### POST /summarize\n"
-        '`{"file": "ascendvent/checkin/src/app/api/checkins/route.ts"}` → purpose, deps, risks, architectural notes · writes `summary-<slug>.md`\n\n'
+        'Model: code. `{"file": "ascendvent/checkin-ascendvent/src/app/api/checkins/route.ts"}` → purpose, deps, risks · `summary-<slug>.md`\n\n'
 
         "### POST /routes\n"
-        '`{"path": "ascendvent/checkin"}` → api_routes, page_routes, server_actions, middleware, auth_paths · writes `routes.md`\n\n'
+        'Model: code. `{"path": "ascendvent/checkin-ascendvent"}` → api_routes, page_routes, middleware, auth_paths · `routes.md`\n\n'
 
         "### POST /dependencies\n"
-        '`{"path": "ascendvent/checkin/src/lib"}` → internal imports, external packages, import graph · writes `dependencies-<slug>.md`\n\n'
+        'No model. `{"path": "ascendvent/checkin-ascendvent/src/lib"}` → import graph · `dependencies-<slug>.md`\n\n'
 
         "### POST /diff-summary\n"
-        '`{"diff": "<git diff text>"}` → summary, risks, files_touched, test_recommendations · writes `diff-<hash>.md`\n'
-        "Call this after every set of edits with the output of `git diff`.\n\n"
+        "Model: reasoning. `{\"diff\": \"<git diff>\"}` → summary, risks, test_recommendations · `diff-<hash>.md`\n"
+        "Call after every set of edits: `git diff | ...`\n\n"
 
         "### POST /vector-search\n"
-        '`{"query": "auth session middleware", "limit": 8}` → ranked list of `{path, chunk, similarity}` · writes `vector-<slug>.md`\n'
-        "Only useful after `/index` has been run. Check `vector_ready` in `/health` first.\n\n"
+        'Model: embeddings. `{"query": "auth session middleware", "limit": 8}` → ranked chunks · `vector-<slug>.md`\n'
+        "Requires `/index` to have been run. Check `vector_ready` in `/health` first.\n\n"
 
         "### POST /index\n"
-        '`{"paths": ["src/app", "src/lib"], "force": false}` → indexes code chunks into pgvector using nomic-embed-text\n'
-        "Run once per session when the codebase has changed. Only needed if you intend to use `/vector-search`.\n"
+        'Model: embeddings. `{"paths": ["ascendvent/checkin-ascendvent/src/app", "ascendvent/checkin-ascendvent/src/lib"], "force": false}`\n'
+        "Run once per session when code has changed. Required before `/vector-search` is useful.\n\n"
+
+        "### POST /draft — JR dev delegation, single file\n"
+        "Model: code. Use when you have a clear spec for one file and want to delegate the typing.\n"
+        "You review the output and apply it yourself — you own the write.\n\n"
+        "```json\n"
+        '{  "task": "add a createdBy field to the Checkin type and the insert call",\n'
+        '   "file": "ascendvent/checkin-ascendvent/src/lib/types.ts",\n'
+        '   "context_files": ["ascendvent/checkin-ascendvent/src/app/api/checkins/route.ts"],\n'
+        '   "mode": "edit"  }\n'
+        "```\n"
+        "- `mode: \"edit\"` — reads the existing file, applies the change\n"
+        "- `mode: \"create\"` — generates a new file; uses context_files as pattern reference\n"
+        "- Returns `{file, mode, code, written_to}` → read `draft-<slug>.md`, verify, then apply\n\n"
+
+        "### POST /scaffold — context window preservation, multi-file\n"
+        "Model: code. Use when a feature spans multiple files and you want to preserve your context window "
+        "for orchestration and review rather than mechanical generation.\n"
+        "Plan the feature yourself first. Pass the file list with a spec per file. Review the batch before applying anything.\n\n"
+        "```json\n"
+        '{  "task": "scaffold a notifications feature",\n'
+        '   "files": [\n'
+        '     {"file": "ascendvent/checkin-ascendvent/src/lib/notifications.ts", "spec": "type definitions and helper functions", "mode": "create"},\n'
+        '     {"file": "ascendvent/checkin-ascendvent/src/app/api/notifications/route.ts", "spec": "GET and POST handlers following existing route patterns", "mode": "create"}\n'
+        '   ],\n'
+        '   "context_files": ["ascendvent/checkin-ascendvent/src/lib/types.ts", "ascendvent/checkin-ascendvent/src/app/api/checkins/route.ts"]  }\n'
+        "```\n"
+        "- `context_files` are read once and passed to every file generation — keep patterns consistent\n"
+        "- Files are generated sequentially (one model in memory at a time)\n"
+        "- Returns `{task, files: [{file, mode, code, written_to}], total, errors}`\n"
+        "- Each file written to `scaffold-<slug>.md` — review all before applying any\n\n"
+        "**Use /draft or /scaffold for:** CRUD routes, unit tests, schema migrations, new components that mirror existing ones, "
+        "implementing a clearly-specced function, adding fields to existing models.\n\n"
+        "**Do NOT use /draft or /scaffold for:** novel architecture, auth/security paths, complex multi-system logic, "
+        "anything where the spec itself requires judgment — plan with Claude first.\n"
         "\n---\n\n"
 
         "## Output files\n\n"
-        "All output is written to `./ai-context/` in the project directory (gitignored).\n"
-        "If a recent file already covers your question, read it directly — do not re-call the endpoint.\n\n"
-        "| File pattern | Endpoint | Re-use if |\n"
+        "All output written to `./ai-context/` (gitignored). Read the file — don't just use the API response.\n\n"
+        "| File | Endpoint | Re-use if |\n"
         "|---|---|---|\n"
         "| `context-bundle.md` | `/context` | same task this session |\n"
-        "| `routes.md` | `/routes` | routes have not changed |\n"
+        "| `routes.md` | `/routes` | routes unchanged |\n"
         "| `scan-<slug>.md` | `/scan` | same path, no code changes |\n"
         "| `find-<slug>.md` | `/find` | same query |\n"
-        "| `summary-<slug>.md` | `/summarize` | file has not been edited |\n"
+        "| `summary-<slug>.md` | `/summarize` | file not edited since |\n"
         "| `diff-<hash>.md` | `/diff-summary` | same diff |\n"
-        "| `vector-<slug>.md` | `/vector-search` | same query |\n\n"
+        "| `vector-<slug>.md` | `/vector-search` | same query |\n"
+        "| `draft-<slug>.md` | `/draft` | re-draft if output unsatisfactory |\n"
+        "| `scaffold-<slug>.md` | `/scaffold` | re-scaffold individual files if needed |\n\n"
         "**Always verify actual source files before editing** — output files are scout reports, not ground truth.\n"
         "\n---\n\n"
 
-        "## Worked example\n\n"
+        "## Worked examples\n\n"
+        "**Single file delegation (/draft):**\n"
         "```\n"
-        "Task: Add rate limiting to the check-in API\n\n"
-        "1. POST /context\n"
-        '   {"task": "Add rate limiting to check-in API", "paths": ["ascendvent/checkin/src/app/api","ascendvent/checkin/src/lib"], "focus": ["rate-limit","checkins","middleware"]}\n\n'
-        "2. Read ./ai-context/context-bundle.md\n"
-        "   → summary: rate limiting not yet implemented\n"
-        "   → suggested_files: src/app/api/checkins/route.ts, src/middleware.ts\n\n"
-        "3. POST /summarize for each suggested file not yet in context\n\n"
-        "4. POST /routes to confirm the middleware chain\n\n"
-        "5. Plan and implement\n\n"
-        "6. POST /diff-summary with git diff output → read risks + test_recommendations\n"
+        "Task: add a createdBy field to the checkin model\n\n"
+        "1. POST /context  →  read context-bundle.md  →  find types.ts + route.ts\n"
+        "2. POST /summarize on types.ts  →  understand current model shape\n"
+        "3. Spec is clear + mechanical  →  POST /draft on types.ts\n"
+        "4. Read draft-*.md  →  verify types, imports, no regressions\n"
+        "5. Apply with Write/Edit  →  POST /draft on route.ts if needed\n"
+        "6. POST /diff-summary  →  read risks + test recommendations\n"
+        "```\n\n"
+        "**Multi-file delegation (/scaffold):**\n"
+        "```\n"
+        "Task: scaffold a notifications feature (3 new files)\n\n"
+        "1. POST /context  →  understand existing patterns (types, routes, components)\n"
+        "2. Plan the feature yourself: which files, what each one does\n"
+        "3. POST /scaffold with all 3 files + context_files for pattern reference\n"
+        "4. Read each scaffold-*.md  →  review the batch\n"
+        "5. Apply files one by one, editing inline where needed\n"
+        "6. POST /diff-summary  →  read risks across all changes\n"
         "```\n"
         "\n---\n\n"
 
-        "## Adding this integration to a project permanently\n\n"
-        "Add the following to the project's `CLAUDE.md` (or equivalent agent rules file).\n"
-        "This ensures every future agent session uses the scout automatically:\n\n"
+        "## Adding this to a project permanently\n\n"
+        "Add to the project's `CLAUDE.md`:\n\n"
         "```\n"
         "## Context Engine\n\n"
-        f"A local context scout runs at {base}.\n"
-        "Before any non-trivial task, call POST /context with the task description, relevant paths, and focus terms.\n"
-        "Read ./ai-context/context-bundle.md before planning or editing.\n"
-        "After editing, call POST /diff-summary with the git diff output and read the result.\n"
-        "The scout is read-only. Always verify actual source files before making changes.\n"
-        f"If {base}/healthcheck returns non-200, proceed without the scout.\n"
+        f"Local context scout and code delegation layer at {base}.\n\n"
+        "Before any non-trivial task: POST /context, read ./ai-context/context-bundle.md.\n"
+        "For mechanical single-file work: POST /draft, review draft-*.md, apply manually.\n"
+        "For multi-file features: POST /scaffold, review each scaffold-*.md, apply manually.\n"
+        "After edits: POST /diff-summary with git diff output, read risks.\n"
+        "Scout is read-only — you own all file writes.\n"
+        f"If {base}/healthcheck returns non-200, proceed without it.\n"
         "```\n"
         "\n---\n"
-        f"_context-engine · repo: `{repo}` · {base} · {base}/docs_\n"
+        f"_context-engine · repo: `{repo}` · {base}_\n"
     )
 
 
@@ -433,11 +521,8 @@ async def find(req: FindRequest):
     if match_snippets:
         snippet_block = build_snippet_block(match_snippets)
         prompt = f"""Query: "{req.query}"
-
-Matching files:
-{snippet_block}
-
-In 2-3 sentences: where is "{req.query}" implemented and what are the key files?"""
+Files: {snippet_block}
+Where is "{req.query}" implemented? Key files? (2-3 sentences)"""
         synthesis = await ollama_client.generate(prompt)
     else:
         synthesis = "No matches found for query."
@@ -485,11 +570,7 @@ async def routes():
                 pass
 
         snippet_block = build_snippet_block(route_snippets)
-        prompt = f"""Analyze these Next.js route files. For each, one line:
-- HTTP methods
-- Auth required?
-- What it does
-
+        prompt = f"""Next.js routes. One line each: HTTP method, auth required, what it does.
 {snippet_block}"""
         analysis = await ollama_client.generate(prompt)
     else:
@@ -556,21 +637,13 @@ async def summarize(req: SummarizeRequest):
 
     det_deps = extract_imports(content)
 
-    prompt = f"""Analyze this file. Respond with JSON only — no markdown fences.
+    prompt = f"""Analyze this file. Respond with JSON only — no markdown fences, no explanation.
 
 File: {req.file}
-
-```
 {content[:config.MAX_TOTAL_CHARS]}
-```
 
-Respond with exactly:
-{{
-  "purpose": "one sentence: what this file does",
-  "dependencies": ["dep1", "dep2"],
-  "risks": ["risk1"],
-  "architectural_notes": ["note1"]
-}}"""
+Respond with exactly this structure:
+{{"purpose":"one sentence: what this file does","dependencies":["dep1","dep2"],"risks":["risk1"],"architectural_notes":["note1"]}}"""
 
     raw    = await ollama_client.generate(prompt)
     parsed = ollama_client.parse_json_response(raw)
@@ -612,6 +685,7 @@ async def context(req: ContextRequest):
         task=req.task,
         paths=req.paths,
         focus=req.focus,
+        use_vector=req.use_vector,
     )
 
     written = mw.write_context(
@@ -696,7 +770,7 @@ async def vector_search(req: VectorSearchRequest):
             "available":  False,
         }
 
-    matches  = await supabase_vector.search(embedding, limit=req.limit)
+    matches  = await supabase_vector.search(embedding, limit=req.limit, threshold=req.threshold)
     written  = mw.write_vector_results(req.query, matches)
 
     log.debug("POST /vector-search done matches=%d dur=%.2fs", len(matches), time.monotonic() - t0)
@@ -723,12 +797,14 @@ async def index(req: IndexRequest):
     """
     available = await supabase_vector.is_available()
     if not available:
+        log.warning("POST /index skipped — vector store not available (migration not run?)")
         return {
-            "paths":     req.paths,
-            "indexed":   0,
-            "skipped":   0,
-            "errors":    0,
-            "available": False,
+            "paths":      req.paths,
+            "indexed":    0,
+            "skipped":    0,
+            "errors":     0,
+            "available":  False,
+            "reason":     "vector store not ready — run the Supabase migration (supabase/migrations/) to create the code_embeddings table, then retry",
             "written_to": "",
         }
 
@@ -787,6 +863,154 @@ async def index(req: IndexRequest):
         "available":  True,
         "written_to": written,
     }
+
+
+# ── Draft ──────────────────────────────────────────────────────────────────────
+
+@app.post("/draft", response_model=DraftResponse)
+async def draft(req: DraftRequest):
+    """
+    Two-tier agent: Claude (SR dev) plans → qwen (JR dev) generates → Claude reviews and applies.
+
+    Reads the target file + any context_files, builds a prompt, and generates
+    code using qwen2.5-coder. Returns the draft as text — Claude owns all writes.
+
+    mode="create" → generate a new file from scratch
+    mode="edit"   → read the existing file and apply the described change
+    """
+    t0 = time.monotonic()
+    log.debug("POST /draft file=%s mode=%s task=%r", req.file, req.mode, req.task)
+
+    # Read target file (if editing an existing one)
+    existing_content = ""
+    if req.mode == "edit":
+        try:
+            f = safe_resolve(req.file)
+            if f.exists() and f.is_file():
+                existing_content = read_file(f)
+        except Exception as e:
+            log.debug("draft: could not read target file %s: %s", req.file, e)
+
+    # Read context files
+    context_blocks: list[str] = []
+    for cf in req.context_files[:5]:
+        try:
+            f = safe_resolve(cf)
+            content = read_file(f)
+            if content:
+                context_blocks.append(f"// {cf}\n{content[:2000]}")
+        except Exception:
+            pass
+
+    context_section = "\n\n".join(context_blocks)
+
+    if req.mode == "edit" and existing_content:
+        prompt = f"""Task: {req.task}
+File: {req.file}
+{("References:" + chr(10) + context_section) if context_section else ""}
+Existing:
+{existing_content[:config.MAX_TOTAL_CHARS]}
+
+Return the complete updated file only. No explanation."""
+    else:
+        prompt = f"""Task: {req.task}
+File: {req.file}
+{("References:" + chr(10) + context_section) if context_section else ""}
+
+Return the complete new file only. No explanation."""
+
+    code = await ollama_client.generate(prompt)
+
+    # Strip accidental markdown fences the model may add despite instructions
+    import re as _re
+    code = _re.sub(r"^```[a-z]*\n?", "", code.strip(), flags=_re.MULTILINE)
+    code = _re.sub(r"\n?```$", "", code.strip(), flags=_re.MULTILINE)
+
+    written = mw.write_draft(file=req.file, task=req.task, mode=req.mode, code=code)
+
+    log.debug("POST /draft done mode=%s code_len=%d dur=%.2fs", req.mode, len(code), time.monotonic() - t0)
+    return DraftResponse(file=req.file, mode=req.mode, code=code, written_to=written)
+
+
+# ── Scaffold ───────────────────────────────────────────────────────────────────
+
+@app.post("/scaffold", response_model=ScaffoldResponse)
+async def scaffold(req: ScaffoldRequest):
+    """
+    Multi-file code generation for context window preservation.
+
+    Use when Claude has broken a feature into files and wants to delegate
+    the mechanical generation of each one — preserving its own context window
+    for orchestration, review, and decisions rather than typing.
+
+    Each file is generated sequentially (memory constraint — one model at a time).
+    Claude reviews the full batch via ai-context/scaffold-*.md before applying anything.
+    Claude owns all writes.
+    """
+    t0 = time.monotonic()
+    log.debug("POST /scaffold task=%r files=%d", req.task, len(req.files))
+
+    # Read shared context files once — passed to every generation
+    shared_context_blocks: list[str] = []
+    for cf in req.context_files[:5]:
+        try:
+            f = safe_resolve(cf)
+            content = read_file(f)
+            if content:
+                shared_context_blocks.append(f"// {cf}\n{content[:1500]}")
+        except Exception:
+            pass
+    shared_context = "\n\n".join(shared_context_blocks)
+
+    results: list[ScaffoldFileResult] = []
+    errors: list[str] = []
+
+    for sf in req.files:
+        try:
+            existing_content = ""
+            if sf.mode == "edit":
+                try:
+                    f = safe_resolve(sf.file)
+                    if f.exists():
+                        existing_content = read_file(f)
+                except Exception:
+                    pass
+
+            if sf.mode == "edit" and existing_content:
+                prompt = f"""Task: {req.task}
+File job: {sf.spec}
+File: {sf.file}
+{("References:" + chr(10) + shared_context) if shared_context else ""}
+Existing:
+{existing_content[:config.MAX_TOTAL_CHARS]}
+
+Return the complete updated file only. No explanation."""
+            else:
+                prompt = f"""Task: {req.task}
+File job: {sf.spec}
+File: {sf.file}
+{("References:" + chr(10) + shared_context) if shared_context else ""}
+
+Return the complete new file only. No explanation."""
+
+            code = await ollama_client.generate(prompt)
+
+            import re as _re
+            code = _re.sub(r"^```[a-z]*\n?", "", code.strip(), flags=_re.MULTILINE)
+            code = _re.sub(r"\n?```$", "", code.strip(), flags=_re.MULTILINE)
+
+            written = mw.write_scaffold_file(
+                file=sf.file, task=req.task, spec=sf.spec, mode=sf.mode, code=code
+            )
+            results.append(ScaffoldFileResult(file=sf.file, mode=sf.mode, code=code, written_to=written))
+            log.debug("scaffold file=%s done code_len=%d", sf.file, len(code))
+
+        except Exception as e:
+            log.error("scaffold file=%s error: %s", sf.file, e)
+            errors.append(f"{sf.file}: {e}")
+
+    log.debug("POST /scaffold done files=%d errors=%d dur=%.2fs", len(results), len(errors), time.monotonic() - t0)
+    return ScaffoldResponse(task=req.task, files=results, total=len(results), errors=errors)
 
 
 def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
