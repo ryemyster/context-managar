@@ -97,14 +97,18 @@ sudo cp scripts/context-manager.newsyslog.conf /etc/newsyslog.d/context-manager.
 **Verify newsyslog picked it up:**
 ```bash
 sudo newsyslog -nv 2>&1 | grep context-manager
+# Expected output (healthy — "skipping" means below threshold, not an error):
+# /Users/rmcdonald/Library/Logs/context-manager.log <5Z>: size (Kb): 12 [10240] --> skipping
 ```
 
-**Force a manual rotation now:**
+**Force a manual rotation now (regardless of size):**
 ```bash
 sudo newsyslog -F /Users/rmcdonald/Library/Logs/context-manager.log
 ```
 
 macOS runs newsyslog automatically via `/System/Library/LaunchDaemons/com.apple.newsyslog.plist` — no further setup needed after the `cp`.
+
+> Already installed on this machine at `/etc/newsyslog.d/context-manager.conf`.
 
 ## Dev workflow — redeploy after Python changes
 
