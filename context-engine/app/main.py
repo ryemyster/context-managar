@@ -337,7 +337,7 @@ async def setup():
         "## Endpoint reference\n\n"
 
         "### POST /context — use before every non-trivial task\n"
-        "Model: reasoning. Scans paths, greps focus terms, runs vector search, synthesises what matters.\n\n"
+        "Model: code. Scans paths, greps focus terms, runs vector search, synthesises what matters.\n\n"
         "```json\n"
         '{  "task": "add rate limiting to the check-in API",\n'
         '   "paths": ["ascendvent/checkin-ascendvent/src/app/api", "ascendvent/checkin-ascendvent/src/lib"],\n'

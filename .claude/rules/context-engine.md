@@ -3,7 +3,7 @@
 A local context scout runs at http://localhost:8088. Claude is the SR dev; the scout is the JR dev — you plan, delegate, review, and apply.
 Do not delegate to `/draft` or `/scaffold` for novel architecture, auth/security paths, or complex multi-system logic.
 
-**Hard constraint:** the scout is read-only. All output goes to `./ai-context/` as Markdown.
+**Hard constraint:** the scout is read-only. All output goes to `~/Library/Application Support/context-store/artifacts/` as Markdown.
 Always verify actual source files before editing — output files are scout reports, not ground truth.
 
 ### Availability check — always first
@@ -33,7 +33,7 @@ All `path` values must use the `owner/repo/` prefix — the service root is `~/R
 
 ### Output file reuse
 
-Output files live in `./ai-context/` (gitignored). Re-use a cached file when the task and
+Output files live in `~/Library/Application Support/context-store/artifacts/`. Re-use a cached file when the task and
 underlying files have not changed this session — do not re-call the endpoint unnecessarily.
 
 | File pattern | Endpoint | Re-use if |
