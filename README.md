@@ -362,6 +362,54 @@ This is expected. The value is that Claude's context budget is preserved.
 
 ---
 
+## Logs
+
+```bash
+# Follow live
+tail -f ~/Library/Logs/context-manager.log
+
+# Last 50 lines
+tail -50 ~/Library/Logs/context-manager.log
+
+# Errors and warnings only
+grep -i "error\|warn\|critical" ~/Library/Logs/context-manager.log | tail -30
+
+# Confirm clean startup
+grep "context-engine starting\|context-engine ready\|repo_root\|supabase=" \
+  ~/Library/Logs/context-manager.log | tail -10
+
+# Watch a specific endpoint
+tail -f ~/Library/Logs/context-manager.log | grep "/find\|/context\|/scan"
+```
+
+Key log lines:
+- `context-engine ready on :8088` — clean startup
+- `store_artifact done` — artifact indexed to Supabase successfully  
+- `store_artifact failed` — background index error (non-fatal, disk backup still written)
+- `SLOW` — request exceeded 5s threshold
+
+---
+
+## Artifacts
+
+Each endpoint writes output twice:
+1. **Supabase cloud** — embedded + upserted as vector chunks (primary, searchable)
+2. **Disk backup** — `~/Library/Application Support/context-store/artifacts/`
+
+The disk copy is evicted automatically once the dir exceeds `ARTIFACTS_MAX_MB` (default 50MB) — oldest files deleted first. Safe to be aggressive since Supabase is the source of truth.
+
+```bash
+# Check size
+du -sh ~/Library/Application\ Support/context-store/artifacts/
+
+# Manual wipe (safe)
+rm ~/Library/Application\ Support/context-store/artifacts/*.md
+
+# Change threshold — edit ARTIFACTS_MAX_MB in the plist, then reload service
+```
+
+---
+
 ## Troubleshooting
 
 **Start here:**
@@ -373,7 +421,7 @@ The `tips` field maps each failure to its fix.
 **`/healthcheck` returns 503**
 - Check `reason` in response: `model not available` → Ollama is down; `repo not mounted` → bad REPO_ROOT
 - Check service is running: `launchctl list | grep context-manager`
-- Check logs: `tail -50 ~/Library/Logs/context-manager.log`
+- Check logs: `grep -i error ~/Library/Logs/context-manager.log | tail -20`
 
 **`ollama: false` in health**
 - Check Ollama is running: `curl http://localhost:11434/api/tags`
@@ -382,6 +430,10 @@ The `tips` field maps each failure to its fix.
 **`vector_ready: false` in health**
 - Check the migration was applied: `supabase db query --linked "SELECT count(*) FROM code_embeddings;"`
 - Check `supabase_key_set: true` in `/debug`
+
+**`store_artifact failed` in logs**
+- Non-fatal — disk backup still written, but chunk won't be searchable via vector
+- Check Supabase connection: `curl -s http://localhost:8088/health | python3 -m json.tool`
 
 **`vector_row_count: 0` in /debug**
 - Run `/index` first: `bash scripts/index.sh "src/app,src/lib"`
