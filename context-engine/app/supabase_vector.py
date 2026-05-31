@@ -175,6 +175,47 @@ async def search(
     return []
 
 
+async def store_artifact(file_path: str) -> None:
+    """
+    Index a context-engine output artifact into the vector store.
+    Fire-and-forget — called after every endpoint write. Never raises.
+    """
+    if not await is_available():
+        return
+    try:
+        from pathlib import Path
+        from . import ollama_client
+
+        path = Path(file_path)
+        if not path.exists():
+            return
+        content = path.read_text(encoding="utf-8")
+        if not content.strip():
+            return
+
+        chunks = _chunk_text(content)
+        for chunk in chunks:
+            if not chunk.strip():
+                continue
+            h = chunk_hash(file_path, chunk)
+            if await already_indexed(h):
+                continue
+            embedding = await ollama_client.embed(f"{path.name}\n{chunk}")
+            if embedding:
+                await upsert_chunk(file_path, chunk, embedding)
+        log.debug("store_artifact done path=%s chunks=%d", path.name, len(chunks))
+    except Exception as e:
+        log.warning("store_artifact failed path=%s: %s", file_path, e)
+
+
+def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
+    chunks, start = [], 0
+    while start < len(text):
+        chunks.append(text[start:min(start + chunk_size, len(text))])
+        start += chunk_size - overlap
+    return chunks
+
+
 async def reset_cache() -> None:
     """Force re-check of vector availability on next call."""
     global _vector_ready

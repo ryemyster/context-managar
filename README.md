@@ -31,17 +31,19 @@ Reduce Claude Code token usage by offloading mechanical context work to local mo
 ## Architecture
 
 ```
-Your repo (read-only /repo)
+Your repo (read-only ~/Repos)
         │
         ▼
-context-engine :8088
+context-engine :8088  (native Python/uvicorn — no Docker)
   ├── 1. Deterministic scan (walk, grep, regex) — zero model cost
-  ├── 2. Vector search → Supabase pgvector (nomic-embed-text)
-  └── 3. Synthesis → Ollama qwen2.5-coder:3b (one call per request)
-        │                    │
-        ▼                    ▼
-  ~/Library/Application Support/context-store/artifacts/*.md
-  (Claude reads these)
+  ├── 2. Vector search → Supabase cloud pgvector (nomic-embed-text)
+  └── 3. Synthesis → Ollama qwen2.5-coder:3b or qwen3.5:9b
+        │
+        ▼
+  Each endpoint response:
+  ├── PRIMARY  → embed + upsert into Supabase cloud (background task)
+  └── BACKUP   → write Markdown to ~/Library/Application Support/
+                  context-store/artifacts/  (crash recovery)
 ```
 
 ### Infrastructure

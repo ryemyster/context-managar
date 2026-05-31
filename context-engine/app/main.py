@@ -11,6 +11,7 @@ Hard rules enforced here:
 - Graceful degradation on all external services (Ollama, Supabase)
 """
 
+import asyncio
 import time
 import traceback
 from contextlib import asynccontextmanager
@@ -281,7 +282,9 @@ async def setup():
         "2. **Reasoning synthesis** — uses a local reasoning model to judge what matters and what's risky\n"
         "3. **Code delegation** — lets you hand off mechanical code generation to a local code model\n\n"
         "You own all planning, architecture, security decisions, and every file write.\n\n"
-        "**Hard constraint:** this service never writes to the repo. All output goes to `~/Library/Application Support/context-store/artifacts/` as Markdown.\n\n"
+        "**Output flow:** each endpoint embeds its result and upserts to Supabase cloud (primary, searchable across sessions), "
+        "then writes a Markdown backup to `~/Library/Application Support/context-store/artifacts/` (crash recovery).\n"
+        "**Hard constraint:** this service never writes to the repo.\n\n"
         f"**Path convention:** `REPO_ROOT` is `{repo}`. All `path` parameters must be prefixed with "
         "`<owner>/<repo>/` — e.g. `\"ascendvent/checkin-ascendvent/src\"`. Never use bare `\".\"` — it scans all of `~/Repos`.\n"
         "\n---\n\n"
@@ -484,6 +487,7 @@ async def scan(req: ScanRequest):
         dependencies=result["dependencies"],
     )
 
+    asyncio.create_task(supabase_vector.store_artifact(written))
     log.debug("POST /scan done files=%d dur=%.2fs", len(result["files"]), time.monotonic() - t0)
     return {
         "path":         req.path,
@@ -534,6 +538,7 @@ Where is "{req.query}" implemented? Key files? (2-3 sentences)"""
         synthesis=synthesis,
     )
 
+    asyncio.create_task(supabase_vector.store_artifact(written))
     log.debug("POST /find done matches=%d dur=%.2fs", len(matches), time.monotonic() - t0)
     return {
         "query":      req.query,
@@ -583,6 +588,7 @@ async def routes():
         routes_data["page_routes"]
     ))
 
+    asyncio.create_task(supabase_vector.store_artifact(written))
     log.debug("POST /routes done api=%d pages=%d dur=%.2fs", len(routes_data["api_routes"]), len(routes_data["page_routes"]), time.monotonic() - t0)
     return {
         "routes":         all_routes,
@@ -606,6 +612,7 @@ async def dependencies(req: DependenciesRequest):
     log.debug("POST /dependencies path=%s", req.path or "/")
     dep_data = map_dependencies(req.path)
     written  = mw.write_dependencies(req.path, dep_data)
+    asyncio.create_task(supabase_vector.store_artifact(written))
     log.debug("POST /dependencies done dur=%.2fs", time.monotonic() - t0)
 
     return {
@@ -655,6 +662,7 @@ Respond with exactly this structure:
 
     written = mw.write_summary(req.file, purpose, deps[:30], risks, arch_notes)
 
+    asyncio.create_task(supabase_vector.store_artifact(written))
     log.debug("POST /summarize done dur=%.2fs", time.monotonic() - t0)
     return {
         "file":               req.file,
@@ -697,6 +705,7 @@ async def context(req: ContextRequest):
         vector_hits=result["vector_hits"],
     )
 
+    asyncio.create_task(supabase_vector.store_artifact(written))
     log.debug("POST /context done files=%d vector_hits=%d dur=%.2fs", len(result["files"]), len(result["vector_hits"]), time.monotonic() - t0)
     return {
         "task":            req.task,
@@ -727,6 +736,7 @@ async def diff_summary(req: DiffRequest):
         test_recs=result["test_recommendations"],
     )
 
+    asyncio.create_task(supabase_vector.store_artifact(written))
     log.debug("POST /diff-summary done files=%d dur=%.2fs", len(result["files_touched"]), time.monotonic() - t0)
     return {
         "summary":              result["summary"],
@@ -928,6 +938,7 @@ Return the complete new file only. No explanation."""
 
     written = mw.write_draft(file=req.file, task=req.task, mode=req.mode, code=code)
 
+    asyncio.create_task(supabase_vector.store_artifact(written))
     log.debug("POST /draft done mode=%s code_len=%d dur=%.2fs", req.mode, len(code), time.monotonic() - t0)
     return DraftResponse(file=req.file, mode=req.mode, code=code, written_to=written)
 
@@ -1002,6 +1013,7 @@ Return the complete new file only. No explanation."""
             written = mw.write_scaffold_file(
                 file=sf.file, task=req.task, spec=sf.spec, mode=sf.mode, code=code
             )
+            asyncio.create_task(supabase_vector.store_artifact(written))
             results.append(ScaffoldFileResult(file=sf.file, mode=sf.mode, code=code, written_to=written))
             log.debug("scaffold file=%s done code_len=%d", sf.file, len(code))
 
