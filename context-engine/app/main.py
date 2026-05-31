@@ -281,7 +281,7 @@ async def setup():
         "2. **Reasoning synthesis** — uses a local reasoning model to judge what matters and what's risky\n"
         "3. **Code delegation** — lets you hand off mechanical code generation to a local code model\n\n"
         "You own all planning, architecture, security decisions, and every file write.\n\n"
-        "**Hard constraint:** this service never writes to the repo. All output goes to `./ai-context/` as Markdown.\n\n"
+        "**Hard constraint:** this service never writes to the repo. All output goes to `~/Library/Application Support/context-store/artifacts/` as Markdown.\n\n"
         f"**Path convention:** `REPO_ROOT` is `{repo}`. All `path` parameters must be prefixed with "
         "`<owner>/<repo>/` — e.g. `\"ascendvent/checkin-ascendvent/src\"`. Never use bare `\".\"` — it scans all of `~/Repos`.\n"
         "\n---\n\n"
@@ -405,7 +405,7 @@ async def setup():
         "\n---\n\n"
 
         "## Output files\n\n"
-        "All output written to `./ai-context/` (gitignored). Read the file — don't just use the API response.\n\n"
+        "All output written to `~/Library/Application Support/context-store/artifacts/`. Read the file — don't just use the API response.\n\n"
         "| File | Endpoint | Re-use if |\n"
         "|---|---|---|\n"
         "| `context-bundle.md` | `/context` | same task this session |\n"
@@ -448,7 +448,7 @@ async def setup():
         "```\n"
         "## Context Engine\n\n"
         f"Local context scout and code delegation layer at {base}.\n\n"
-        "Before any non-trivial task: POST /context, read ./ai-context/context-bundle.md.\n"
+        "Before any non-trivial task: POST /context, read context-bundle.md from artifacts dir.\n"
         "For mechanical single-file work: POST /draft, review draft-*.md, apply manually.\n"
         "For multi-file features: POST /scaffold, review each scaffold-*.md, apply manually.\n"
         "After edits: POST /diff-summary with git diff output, read risks.\n"
@@ -944,7 +944,7 @@ async def scaffold(req: ScaffoldRequest):
     for orchestration, review, and decisions rather than typing.
 
     Each file is generated sequentially (memory constraint — one model at a time).
-    Claude reviews the full batch via ai-context/scaffold-*.md before applying anything.
+    Claude reviews the full batch via the artifacts dir scaffold-*.md before applying anything.
     Claude owns all writes.
     """
     t0 = time.monotonic()

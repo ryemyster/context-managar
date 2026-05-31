@@ -40,8 +40,8 @@ context-engine :8088
   └── 3. Synthesis → Ollama qwen2.5-coder:3b (one call per request)
         │                    │
         ▼                    ▼
-  ./ai-context/*.md    founderos-ollama
-  (Claude reads these)  (shared, not duplicated)
+  ~/Library/Application Support/context-store/artifacts/*.md
+  (Claude reads these)
 ```
 
 ### Infrastructure
@@ -246,7 +246,7 @@ bash scripts/context.sh \
 
 Then tell Claude:
 ```
-Read ./ai-context/context-bundle.md then implement:
+Read ~/Library/Application\ Support/context-store/artifacts/context-bundle.md then implement:
 "Add plan enforcement to check-in generation"
 ```
 
@@ -279,7 +279,7 @@ bash scripts/index.sh "src/app" force
 
 ## Output Files
 
-All context written to `./ai-context/` (gitignored):
+All context written to `~/Library/Application Support/context-store/artifacts/`:
 
 | File | Endpoint | Description |
 |---|---|---|
@@ -305,7 +305,7 @@ All context written to `./ai-context/` (gitignored):
    # Wait 60-120s for context-bundle.md
 
 3. Tell Claude:
-   "Read ./ai-context/context-bundle.md
+   "Read ~/Library/Application Support/context-store/artifacts/context-bundle.md
     then implement: [your task]"
 
 4. Claude reads pre-digested context (~500 tokens)
