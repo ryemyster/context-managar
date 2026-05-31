@@ -34,13 +34,122 @@ scripts/            — shell wrappers for each endpoint
 
 **Routing rule:** `/diff-summary` → `generate_reasoning()` (risk analysis is judgment). Everything else → `generate()` (code pattern matching) or `embed()`. `/context` uses code model for synthesis — relevance scoring is pattern matching, not reasoning.
 
-## Dev workflow
+## Service management (launchd)
 
-1. Edit `.py` files
-2. `/rebuild` — container must rebuild for changes to take effect
-3. Test with `curl` — the API is the source of truth, not the code
+The service runs as a native Python process — no Docker. Managed by:
+`~/Library/LaunchAgents/life.ascendvent.context-manager.plist`
 
-Never test by reading the code and assuming it works. Always curl the endpoint.
+Auto-starts on login, restarts on crash (KeepAlive=true).
+
+```bash
+# Status — col 1 = PID, col 2 = last exit code, col 3 = label
+launchctl list | grep context-manager
+
+# Stop
+launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+
+# Start
+launchctl load ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+
+# Logs
+tail -f ~/Library/Logs/context-manager.log
+```
+
+## Dev workflow — redeploy after Python changes
+
+No rebuild needed — it's plain Python. Just restart the service:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+launchctl load  ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+```
+
+Confirm health after:
+```bash
+curl -s http://localhost:8088/health | python3 -m json.tool
+```
+
+Never assume a change works by reading the code. Always curl the endpoint.
+
+## Dev workflow — adding a Python dependency
+
+```bash
+# Install into the venv
+context-engine/.venv/bin/pip install <package>
+
+# Pin it in requirements.txt
+echo "<package>==<version>" >> context-engine/requirements.txt
+
+# Restart
+launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+launchctl load  ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+```
+
+If setting up on a new machine from scratch:
+```bash
+cd context-engine
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+## Database — schema migrations (Supabase cloud)
+
+Supabase is the **cloud project** `rwtaxwtbwtyxcdlkozod.supabase.co`. There is no local Supabase for this project.
+
+**Adding or changing schema:**
+
+```bash
+# 1. Create a migration file (always use this — never invent filenames)
+supabase migration new <descriptive-name>
+
+# 2. Write the SQL in supabase/migrations/<timestamp>_<name>.sql
+
+# 3. Apply to cloud directly (db push won't work — cloud has migrations from
+#    the shared checkin-ascendvent project that aren't in this repo's local dir)
+supabase db query --linked -f supabase/migrations/<your-file>.sql
+```
+
+**Why not `supabase db push`?** The cloud project is shared with checkin-ascendvent. It has 24+ migrations this repo doesn't know about. `db push` rejects that mismatch. Always use `db query --linked -f` to apply migrations for this project.
+
+**Verify after applying:**
+
+```bash
+supabase db query --linked "SELECT count(*) FROM code_embeddings;"
+```
+
+## Database — data re-migration
+
+If you need to wipe and re-seed vector data (e.g. schema changed, stale embeddings):
+
+```bash
+# 1. Wipe cloud table
+supabase db query --linked "TRUNCATE code_embeddings;"
+
+# 2. Re-index via the engine (re-embeds from source files)
+curl -s -X POST http://localhost:8088/index \
+  -H "Content-Type: application/json" \
+  -d '{"paths": ["ascendvent/checkin-ascendvent/app", "ascendvent/founderos/src"], "force": true}'
+```
+
+If you need to move data from the local Docker Supabase (checkin-ascendvent) to cloud again:
+
+```bash
+# Dump local (Docker Supabase runs on port 54322)
+supabase db dump --local --data-only -f /tmp/local_export.sql
+
+# Extract code_embeddings block (find line numbers with grep -n)
+grep -n "Data for Name: code_embeddings" /tmp/local_export.sql
+# Then: sed -n '<start>,<end>p' /tmp/local_export.sql > /tmp/data.sql
+
+# Push to cloud
+supabase db query --linked -f /tmp/data.sql
+
+# Verify
+supabase db query --linked "SELECT count(*) FROM code_embeddings;"
+
+# Clean up
+rm /tmp/local_export.sql /tmp/data.sql
+```
 
 ## Adding a new endpoint — 4 files, always
 

@@ -44,14 +44,15 @@ context-engine :8088
   (Claude reads these)  (shared, not duplicated)
 ```
 
-### Networks used
+### Infrastructure
 
-| Network | Purpose |
+| Component | Where it runs |
 |---|---|
-| `founderos_default` | Reaches `founderos-ollama` (qwen + nomic) |
-| `supabase_network_checkin-ascendvent` | Reaches Supabase for vector storage |
+| context-engine API | Native Python process (uvicorn), managed by launchd |
+| Ollama models | Native macOS service on `localhost:11434` |
+| Supabase (vector store) | Cloud — `rwtaxwtbwtyxcdlkozod.supabase.co` |
 
-No new networks created. Both are external and already exist.
+No Docker required.
 
 ### Model assignment
 
@@ -66,10 +67,10 @@ No new networks created. Both are external and already exist.
 
 ## Prerequisites
 
-- `founderos-ollama` running on `founderos_default`
-- `qwen2.5-coder:3b` and `nomic-embed-text` pulled
-- Supabase running on `supabase_network_checkin-ascendvent`
-- Docker Desktop with `founderos_default` and Supabase networks active
+- Ollama running natively (`brew install ollama && ollama serve`)
+- Models pulled: `ollama pull qwen2.5-coder:3b qwen3.5:9b nomic-embed-text`
+- Python 3.12+ on the host
+- Supabase cloud project (already configured — `rwtaxwtbwtyxcdlkozod.supabase.co`)
 
 ---
 
@@ -102,46 +103,37 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 Get your service role key from:
 **Supabase Studio → Settings → API → `service_role` (secret)**
 
-### 3. Set up vector table (optional but recommended)
-
-Run the SQL migration in Supabase Studio SQL editor:
-```
-supabase/migrations/20240101_code_embeddings.sql
-```
-
-Or via Supabase CLI:
-```bash
-supabase db push
-```
-
-This creates the `code_embeddings` table and `match_code_embeddings` function.
-Vector features degrade gracefully if this step is skipped.
-
-### 4. Start
+### 3. Set up the venv
 
 ```bash
-bash scripts/start-context.sh
-# or directly:
-docker compose up -d --build
+cd context-engine
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
 
-### 5. Verify
+### 4. Set up the launchd service
 
 ```bash
-curl http://localhost:8088/healthcheck
-# {"ok":true,"model":"qwen2.5-coder:3b","repo":"/path/to/your/project"}
+cp ~/Library/LaunchAgents/life.ascendvent.context-manager.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
 ```
 
-### 6. Tune Ollama
+The plist is at `~/Library/LaunchAgents/life.ascendvent.context-manager.plist` and configures all env vars — no separate shell sourcing needed.
 
-See `docs/ollama-optimization.md` — add these to your founderos docker-compose:
-```yaml
-environment:
-  - OLLAMA_MAX_LOADED_MODELS=1
-  - OLLAMA_NUM_PARALLEL=1
-  - OLLAMA_KEEP_ALIVE=5m
-  - OLLAMA_NUM_THREAD=4
-  - OLLAMA_FLASH_ATTENTION=1
+### 5. Apply Supabase migrations (first time / new schema)
+
+**Do NOT use `supabase db push`** — the cloud project is shared with other apps; `db push` rejects the mismatch. Apply SQL directly:
+
+```bash
+supabase link --project-ref rwtaxwtbwtyxcdlkozod --yes
+supabase db query --linked -f supabase/migrations/<file>.sql
+```
+
+### 6. Verify
+
+```bash
+curl -s http://localhost:8088/health | python3 -m json.tool
+# "status": "ok" confirms Ollama, Supabase, and repo all healthy
 ```
 
 ---
@@ -377,41 +369,48 @@ curl http://localhost:8088/debug | python3 -m json.tool
 The `tips` field maps each failure to its fix.
 
 **`/healthcheck` returns 503**
-- Check `reason` in response: `model not available` → Ollama is down; `repo not mounted` → bad REPO_PATH
-- `docker inspect founderos-ollama` to check Ollama container
+- Check `reason` in response: `model not available` → Ollama is down; `repo not mounted` → bad REPO_ROOT
+- Check service is running: `launchctl list | grep context-manager`
+- Check logs: `tail -50 ~/Library/Logs/context-manager.log`
+
+**`ollama: false` in health**
+- Check Ollama is running: `curl http://localhost:11434/api/tags`
+- Start it: `ollama serve` (or it runs as a native service after install)
+
+**`vector_ready: false` in health**
+- Check the migration was applied: `supabase db query --linked "SELECT count(*) FROM code_embeddings;"`
+- Check `supabase_key_set: true` in `/debug`
 
 **`vector_row_count: 0` in /debug**
 - Run `/index` first: `bash scripts/index.sh "src/app,src/lib"`
 
-**Empty vector results (row count > 0)**
-- After qwen endpoints, nomic needs up to 30s to swap in — built-in 90s timeout handles it
-- Retry the search once
-
 **`model timeout` in responses**
-- Context budget too large. Try a more specific path: `/scan src/app/api` not `/scan .`
+- Context budget too large. Use a more specific path: `/scan src/app/api` not `/scan .`
 - Or the model hasn't loaded yet — retry after 10s
 
-**`vector_ready: false` in health**
-- Run the SQL migration in `supabase/migrations/20240101_code_embeddings.sql`
-- Check `supabase_key_set: true` in `/debug`
-- Verify Supabase is running: `docker ps | grep supabase`
-
-**`ollama: false` in health**
-- Check founderos-ollama is running: `docker inspect founderos-ollama`
-- Check it's on the right network: `docker network inspect founderos_default`
-
 **`repo_mounted: false`**
-- Check `REPO_PATH` in `.env` points to an existing directory
+- Check `REPO_ROOT` in the plist or `.env` points to an existing directory
+- Default: `/Users/rmcdonald/Repos`
 
 ---
 
-## Stopping
+## Starting / Stopping
 
 ```bash
-docker compose down
+# Stop
+launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+
+# Start
+launchctl load ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+
+# Logs
+tail -f ~/Library/Logs/context-manager.log
+
+# Status + PID
+launchctl list | grep context-manager
 ```
 
-founderos-ollama and Supabase continue running normally.
+Ollama and Supabase are independent — stopping this service does not affect them.
 
 ---
 

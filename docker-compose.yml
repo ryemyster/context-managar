@@ -26,9 +26,8 @@ services:
       - MAX_FILES_PER_SCAN=${MAX_FILES_PER_SCAN:-80}
       - MAX_SNIPPETS_PER_QUERY=${MAX_SNIPPETS_PER_QUERY:-20}
 
-      # Supabase — uses internal Docker hostname on supabase network
-      # Override in .env for local testing outside Docker
-      - SUPABASE_URL=${SUPABASE_URL:-http://supabase_kong_checkin-ascendvent:8000}
+      # Supabase — cloud instance (set in .env)
+      - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
       - SUPABASE_VECTOR_TABLE=${SUPABASE_VECTOR_TABLE:-code_embeddings}
       - SUPABASE_MATCH_FUNCTION=${SUPABASE_MATCH_FUNCTION:-match_code_embeddings}
@@ -40,9 +39,6 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-    networks:
-      - supabase_net # reaches supabase_kong_checkin-ascendvent
-
     restart: unless-stopped
 
     healthcheck:
@@ -51,9 +47,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
-
-# Attach to existing networks — do NOT create new ones
-networks:
-  supabase_net:
-    external: true
-    name: supabase_network_checkin-ascendvent
