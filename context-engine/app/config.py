@@ -23,6 +23,9 @@ OLLAMA_REASON_PREDICT = 1024    # reasoning model needs room for chain-of-though
 REPO_ROOT  = Path(os.getenv("REPO_ROOT",   "/repo")).resolve()
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR",  "/output")).resolve()
 
+# Max size of the artifacts dir before oldest files are evicted (0 = no limit)
+ARTIFACTS_MAX_MB = int(os.getenv("ARTIFACTS_MAX_MB", "50"))
+
 # ── Scan limits ────────────────────────────────────────────────────────────────
 MAX_FILE_BYTES       = int(os.getenv("MAX_FILE_BYTES",       "32768"))   # 32 KB per file
 MAX_FILES_PER_SCAN   = int(os.getenv("MAX_FILES_PER_SCAN",   "80"))

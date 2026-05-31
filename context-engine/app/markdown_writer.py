@@ -23,11 +23,28 @@ def ts() -> str:
 
 
 def write(filename: str, content: str) -> str:
-    """Write content to OUTPUT_DIR/filename. Returns absolute path."""
+    """Write content to OUTPUT_DIR/filename, then evict oldest files if over size limit."""
     config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     out = config.OUTPUT_DIR / filename
     out.write_text(content, encoding="utf-8")
+    _evict_if_needed()
     return str(out)
+
+
+def _evict_if_needed() -> None:
+    """Delete oldest files in OUTPUT_DIR until total size is under ARTIFACTS_MAX_MB."""
+    if config.ARTIFACTS_MAX_MB <= 0:
+        return
+    limit = config.ARTIFACTS_MAX_MB * 1024 * 1024
+    files = sorted(
+        [f for f in config.OUTPUT_DIR.iterdir() if f.is_file()],
+        key=lambda f: f.stat().st_mtime,
+    )
+    total = sum(f.stat().st_size for f in files)
+    while total > limit and files:
+        oldest = files.pop(0)
+        total -= oldest.stat().st_size
+        oldest.unlink(missing_ok=True)
 
 
 def _list(items: list[str], prefix: str = "-") -> str:
