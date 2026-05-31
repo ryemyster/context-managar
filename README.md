@@ -340,7 +340,7 @@ Run: `curl -s http://localhost:8088/setup` and use it to configure this project 
 
 ## Memory Expectations (M3 Air, 8 GB)
 
-| State | Docker VM used |
+| State | RAM used |
 |---|---|
 | All services idle, no model loaded | ~3.3 GB |
 | During qwen generation (scan/find/context) | ~5.1 GB (88%) |

@@ -2,8 +2,8 @@
 
 ## After editing any Python file
 
-Always rebuild before testing. The container caches the old code until rebuilt.
-Use `/rebuild` — it builds, restarts, and confirms health in one step.
+Always restart the service before testing. It's plain Python — no rebuild needed, just reload.
+Use `/rebuild` — it restarts via launchctl and confirms health in one step.
 
 Never assume a change works by reading the code. Test with curl.
 
@@ -22,7 +22,7 @@ curl -s -X POST http://localhost:8088/<endpoint> \
 ## Config changes
 
 All env vars live in `config.py` — never call `os.getenv()` anywhere else.
-`.env` overrides compose defaults. After changing `.env`, restart with `docker compose up -d` (no rebuild needed unless Python changed).
+`.env` overrides plist defaults. After changing `.env`, restart the launchd service (no rebuild needed — it's plain Python).
 
 ## Model routing — enforce always
 

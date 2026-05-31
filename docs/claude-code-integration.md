@@ -42,15 +42,15 @@ writes the CLAUDE.md block, creates the slash command, tells you whether to run 
 
 ### 1. Point context-engine at your repo
 
-In `~/Repos/ryemyster/local-model/.env`:
+In `.env` at the repo root:
 ```
 REPO_PATH=/path/to/your/project
 ```
 
-Then restart (no rebuild needed):
+Then restart (no rebuild needed — it's plain Python):
 ```bash
-cd ~/Repos/ryemyster/local-model
-docker compose up -d
+launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+launchctl load  ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
 ```
 
 Verify:
@@ -148,13 +148,12 @@ semantically relevant results. Re-run when the codebase changes significantly.
 You can only point context-engine at **one repo at a time**. To switch:
 
 ```bash
-cd ~/Repos/ryemyster/local-model
-
-# Edit REPO_PATH
+# Edit REPO_PATH in .env
 sed -i '' 's|^REPO_PATH=.*|REPO_PATH=/path/to/other-project|' .env
 
 # Restart (no rebuild needed)
-docker compose up -d
+launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+launchctl load  ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
 
 # Verify the new repo is mounted
 curl http://localhost:8088/healthcheck
@@ -166,7 +165,7 @@ curl http://localhost:8088/healthcheck
 
 | Endpoint | Use case | Returns |
 |---|---|---|
-| `GET /healthcheck` | Docker health, monitors, scripts | HTTP 200 `{"ok":true}` or HTTP 503 `{"ok":false,"reason":"..."}` |
+| `GET /healthcheck` | Health checks, monitors, scripts | HTTP 200 `{"ok":true}` or HTTP 503 `{"ok":false,"reason":"..."}` |
 | `GET /health` | Full status check | JSON with all service states, always HTTP 200 |
 | `GET /debug` | Troubleshooting | Model loaded, vector row count, all output files, config, tips |
 | `GET /setup` | Configure a new project | Live Markdown Claude can read and act on |
@@ -203,7 +202,7 @@ Run: `curl -s http://localhost:8088/setup` and use it to configure this project
 
 ## Memory expectations (M3 Air 8GB)
 
-| Operation | Docker VM | Duration |
+| Operation | RAM used | Duration |
 |---|---|---|
 | Idle (no model loaded) | ~3.3 GB | — |
 | `/scan`, `/find`, `/summarize` | ~5.1 GB | 30-90s |
@@ -231,16 +230,16 @@ The `tips` field in `/debug` maps each failure to its fix. Below is the quick re
 
 **`/healthcheck` returns 503**
 - Check `reason` field in the response body
-- `model not available` → Ollama is down: `docker inspect founderos-ollama`
+- `model not available` → Ollama is down: `ollama list` to check, `ollama serve` to start
 - `repo not mounted` → `REPO_PATH` in `.env` doesn't exist
 
 **Wrong repo being scanned**
 - Check `repo_root` in `/health` or `/debug`
-- Update `REPO_PATH` in `.env` → `docker compose up -d`
+- Update `REPO_PATH` in `.env` → restart with launchctl unload/load
 
 **`supabase_key_set: false` in /debug**
 - `.env` still has placeholder key — get real key from Supabase Studio → Settings → API → `service_role`
 
 **Port 8088 taken**
-- `docker ps | grep 8088` — stop the conflicting container first
-- `docker compose down && docker compose up -d`
+- `lsof -i :8088` — find and stop the conflicting process first
+- Then restart: launchctl unload/load the plist
