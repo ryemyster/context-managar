@@ -1,9 +1,8 @@
 # Local environment — contains your repo path, never commit
 .env
 
-# Generated context files — Claude reads these but they don't belong in git
-ai-context/*
-!ai-context/.gitkeep
+# Supabase CLI temp files
+supabase/.temp/
 
 # Python
 __pycache__/
