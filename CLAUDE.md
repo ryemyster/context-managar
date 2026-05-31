@@ -85,6 +85,27 @@ Key lines to look for:
 - `store_artifact failed` — background indexing error (non-fatal)
 - `SLOW` — request exceeded `SLOW_REQUEST_MS` threshold (default 5s)
 
+### Log rotation (newsyslog)
+
+The config file is `scripts/context-manager.newsyslog.conf`. It rotates at 10 MB, keeps 5 compressed archives (`.gz`).
+
+**Install once (requires sudo):**
+```bash
+sudo cp scripts/context-manager.newsyslog.conf /etc/newsyslog.d/context-manager.conf
+```
+
+**Verify newsyslog picked it up:**
+```bash
+sudo newsyslog -nv 2>&1 | grep context-manager
+```
+
+**Force a manual rotation now:**
+```bash
+sudo newsyslog -F /Users/rmcdonald/Library/Logs/context-manager.log
+```
+
+macOS runs newsyslog automatically via `/System/Library/LaunchDaemons/com.apple.newsyslog.plist` — no further setup needed after the `cp`.
+
 ## Dev workflow — redeploy after Python changes
 
 No rebuild needed — it's plain Python. Just restart the service:
