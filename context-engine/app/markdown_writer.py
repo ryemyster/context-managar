@@ -219,11 +219,54 @@ def write_context(
     risks: list[str],
     suggested_files: list[str],
     vector_hits: list[dict],
+    audit_table: list[dict] | None = None,
+    warnings: list[str] | None = None,
+    dropped_candidates: list[dict] | None = None,
 ) -> str:
     vh_lines = "\n".join(
         f"- `{h['path']}` (similarity: {h.get('similarity', 0):.2f})"
         for h in vector_hits[:8]
     ) or "_no vector hits_"
+    audit_rows = audit_table or []
+    audit_lines = "\n".join(
+        "| {issue} | {status} | {evidence} | {missing} | {recommendation} |".format(
+            issue=row.get("issue", ""),
+            status=row.get("status", ""),
+            evidence=", ".join(f"`{p}`" for p in row.get("evidence_files", [])[:5]) or "_none_",
+            missing=", ".join(row.get("missing_evidence", [])[:5]) or "_none_",
+            recommendation=row.get("recommendation", ""),
+        )
+        for row in audit_rows
+        if isinstance(row, dict)
+    )
+    audit_section = ""
+    if audit_rows:
+        audit_section = f"""
+## Issue Audit
+| Issue | Status | Evidence Files | Missing Evidence | Recommendation |
+|---|---|---|---|---|
+{audit_lines}
+"""
+
+    warning_section = ""
+    if warnings:
+        warning_section = f"""
+## Warnings
+{_list(warnings)}
+"""
+
+    dropped_section = ""
+    dropped = dropped_candidates or []
+    if dropped:
+        dropped_lines = [
+            f"`{item.get('path', '')}` — {item.get('reason', '')}"
+            for item in dropped[:20]
+            if isinstance(item, dict)
+        ]
+        dropped_section = f"""
+## Dropped Candidates
+{_list(dropped_lines)}
+"""
 
     content = f"""# Context Bundle
 _Task: {task}_
@@ -237,6 +280,9 @@ _Generated: {ts()} — Model: {config.OLLAMA_MODEL}_
 
 ## Vector Search Hits
 {vh_lines}
+{audit_section}
+{warning_section}
+{dropped_section}
 
 ## Risks
 {_list(risks)}

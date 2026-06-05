@@ -15,7 +15,8 @@ import asyncio
 import time
 import traceback
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request
+from pathlib import Path
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from . import config
@@ -36,12 +37,13 @@ async def lifespan(app: FastAPI):
     yield
     log.info("context-engine shutting down")
 from . import markdown_writer as mw
+from . import artifact_store
 from .models import (
     ScanRequest, FindRequest, DependenciesRequest, SummarizeRequest,
-    ContextRequest, DiffRequest, VectorSearchRequest, IndexRequest, DraftRequest, ScaffoldRequest,
+    ContextRequest, DiffRequest, VectorSearchRequest, IndexRequest, DraftRequest, ScaffoldRequest, IssueAuditRequest,
     HealthResponse, ScanResponse, FindResponse, RoutesResponse,
     DependenciesResponse, SummarizeResponse, ContextResponse,
-    DiffResponse, VectorSearchResponse, IndexResponse, DraftResponse, ScaffoldResponse, ScaffoldFileResult,
+    DiffResponse, VectorSearchResponse, IndexResponse, DraftResponse, ScaffoldResponse, ScaffoldFileResult, IssueAuditResponse,
 )
 from .repo_reader import safe_resolve, read_file, rel_path, walk_repo, build_snippet_block
 from .search_worker import find_in_repo, extract_imports
@@ -50,6 +52,8 @@ from .dependency_mapper import map_dependencies
 from .scanner import scan_directory
 from .diff_reviewer import review_diff
 from .context_builder import build_context
+from .issue_auditor import collect_agent_evidence, findings_from_evidence, insufficient_evidence_findings
+from .context_builder import _issue_numbers
 
 app = FastAPI(
     title="context-engine",
@@ -277,13 +281,15 @@ async def setup():
         "\n---\n\n"
 
         "## What this service does\n\n"
-        "Three jobs, in priority order:\n\n"
+        "Four jobs, in priority order:\n\n"
         "1. **Retrieval** — finds relevant files and code without burning your token budget on recall\n"
-        "2. **Reasoning synthesis** — uses a local reasoning model to judge what matters and what's risky\n"
-        "3. **Code delegation** — lets you hand off mechanical code generation to a local code model\n\n"
+        "2. **Agent delegation** — runs bounded junior-agent workflows such as issue audits\n"
+        "3. **Reasoning synthesis** — uses a local reasoning model to judge what matters and what's risky\n"
+        "4. **Code delegation** — lets you hand off mechanical code generation to a local code model\n\n"
         "You own all planning, architecture, security decisions, and every file write.\n\n"
-        "**Output flow:** each endpoint embeds its result and upserts to Supabase cloud (primary, searchable across sessions), "
-        "then writes a Markdown backup to `~/Library/Application Support/context-store/artifacts/` (crash recovery).\n"
+        "**Output flow:** `/context` and agent endpoints write a canonical JSON record first, append an `events.jsonl` ledger entry, "
+        "render Markdown for human/agent recovery, then optionally embed the JSON record with Ollama and upsert that derived memory into Supabase. "
+        "The vector store is a rebuildable index; local JSON artifacts are the durable source of truth.\n"
         "**Hard constraint:** this service never writes to the repo.\n\n"
         f"**Path convention:** `REPO_ROOT` is `{repo}`. All `path` parameters must be prefixed with "
         "`<owner>/<repo>/` — e.g. `\"ascendvent/checkin-ascendvent/src\"`. Never use bare `\".\"` — it scans all of `~/Repos`.\n"
@@ -294,11 +300,15 @@ async def setup():
         "|-------|------|-----------|\n"
         f"| `{config.OLLAMA_REASON_MODEL}` | Reasoning — judgment, risks, what matters | `/diff-summary` |\n"
         f"| `{config.OLLAMA_MODEL}` | Code — pattern matching, generation, summarisation | `/context`, `/draft`, `/scaffold`, `/scan`, `/find`, `/summarize` |\n"
-        f"| `{config.OLLAMA_EMBED_MODEL}` | Embeddings — semantic search only, no generation | `/index`, `/vector-search`, `/context` |\n\n"
+        f"| `{config.OLLAMA_EMBED_MODEL}` | Embeddings — turns repo chunks and artifact records into Supabase vectors | `/index`, `/vector-search`, `/context`, agent artifact indexing |\n\n"
+        "**Note:** `qwen3:4b` is installed in Ollama but is NOT used by this service — "
+        "it appears in `/health` `available_models` but has no routing assignment. Ignore it.\n\n"
         "**Why the split matters:**\n"
         "- `/diff-summary` uses the reasoning model — risk analysis and test recommendations are judgment.\n"
         "- `/context` uses the code model — relevance scoring is pattern matching, not reasoning. "
         "Also avoids a slow 9b cold-load after the embed step.\n"
+        "- Artifact memory uses Ollama embeddings (`nomic-embed-text`) before Supabase upsert. "
+        "Supabase stores vectors; Ollama creates them.\n"
         "- `/draft` and `/scaffold` use the code model because generating code from a clear spec "
         "is pattern matching, not reasoning.\n"
         "- You (Claude Code) are the SR dev. The code model is the JR dev. "
@@ -328,22 +338,42 @@ async def setup():
         "| Want semantically similar code chunks | `POST /vector-search` |\n"
         "| One file to generate or edit — spec is clear | `POST /draft` — JR dev delegation |\n"
         "| Feature spans multiple files — want to preserve context window | `POST /scaffold` — multi-file delegation |\n"
+        "| Auditing GitHub issues against repo evidence | `POST /agents/issue-auditor/run` → poll `GET /agents/issue-auditor/status/{run_id}` |\n"
         "| Novel architecture, security, complex logic | Claude only — do not delegate |\n"
         "| Engine unreachable | Proceed without it — never block on the scout |\n\n"
         f"**Skip when:** one-liner task, files already in context, or `{base}/healthcheck` returns non-200.\n\n"
         f"**Troubleshoot:** `GET {base}/debug` — model state, vector row count, config. No model calls.\n"
+        "**Agent integration rule:** call deterministic endpoints or agent endpoints first, read `artifacts.record`, "
+        "then optionally use vector search for recall. Do not use vector hits as closure evidence without verifying source files.\n"
         "\n---\n\n"
 
         "## Endpoint reference\n\n"
 
         "### POST /context — use before every non-trivial task\n"
-        "Model: code. Scans paths, greps focus terms, runs vector search, synthesises what matters.\n\n"
+        "Model: code. Scans only requested paths, greps focus terms in scope, optionally runs vector search, "
+        "post-filters suggestions to existing scoped files, and synthesises what matters.\n\n"
         "```json\n"
         '{  "task": "add rate limiting to the check-in API",\n'
         '   "paths": ["ascendvent/checkin-ascendvent/src/app/api", "ascendvent/checkin-ascendvent/src/lib"],\n'
         '   "focus": ["rate-limit", "middleware", "checkins"]  }\n'
         "```\n"
-        "Returns: `summary`, `suggested_files`, `risks`, `vector_hits`, `written_to` → read `context-bundle.md`\n\n"
+        "Returns: `summary`, `suggested_files`, `risks`, `vector_hits`, `warnings`, `dropped_candidates`, `artifacts`, `written_to` "
+        "→ read `context-bundle.md` or the structured artifact record.\n\n"
+
+        "### POST /agents/issue-auditor/run — async junior PM/admin issue audit\n"
+        "Model: code. Delegated workflow for evidence-based issue triage. **Returns immediately** with `run_id` and `status: \"running\"`. "
+        "Poll `GET /agents/issue-auditor/status/{run_id}` until status is no longer `\"running\"`.\n\n"
+        "```json\n"
+        '{  "repo": "ryemyster/ShaleYeah",\n'
+        '   "paths": ["agents", "servers", "sdk", "orchestrator"],\n'
+        '   "task": "Audit issues #363-#376 for Tier 2 standalone-agent migration completion",\n'
+        '   "requirements": ["src/agent implementation required", "agent.test.ts required", "mcp-client.test.ts required"],\n'
+        '   "focus": ["issue 363", "issue 376", "src/agent/index.ts", "agent.test.ts", "mcp-client.test.ts"] }\n'
+        "```\n"
+        "Returns immediately: `run_id`, `status: \"running\"`, `artifacts.record` (path to poll). "
+        "Poll: `GET /agents/issue-auditor/status/{run_id}` → same shape; `status` becomes `complete`, `insufficient_evidence`, or `error` when done. "
+        "Each finding contains `issue`, `status`, `evidence_files`, `missing_evidence`, and `recommendation`. "
+        "Status and recommendation are rule-based from the evidence matrix; the model does not override closure decisions.\n\n"
 
         "### POST /scan\n"
         'Model: code. `{"path": "ascendvent/checkin-ascendvent/src/app/api"}` → file list, patterns · `scan-<slug>.md`\n\n'
@@ -361,12 +391,38 @@ async def setup():
         'No model. `{"path": "ascendvent/checkin-ascendvent/src/lib"}` → import graph · `dependencies-<slug>.md`\n\n'
 
         "### POST /diff-summary\n"
-        "Model: reasoning. `{\"diff\": \"<git diff>\"}` → summary, risks, test_recommendations · `diff-<hash>.md`\n"
-        "Call after every set of edits: `git diff | ...`\n\n"
+        "Model: reasoning (`think: false` — chain-of-thought disabled for speed). "
+        f"`{{\"diff\": \"<git diff output>\"}}` → summary, risks, test_recommendations · `diff-<hash>.md`\n\n"
+        "**Input contract:** pass raw `git diff` output — unified diff format with file headers and hunks. "
+        "The model reads actual changed lines, not descriptions. "
+        "Do NOT summarize the diff yourself or pass a description — pass the diff text verbatim.\n\n"
+        "**Quality depends on specificity:** a 10-line focused diff yields precise risks. "
+        "A 500-line diff yields generic risks. Scope your diff when detail matters: "
+        "`git diff HEAD -- path/to/file.py`\n\n"
+        f"**Size limit — paginate above ~{config.DIFF_MAX_CHARS:,} characters (~130 diff lines):**\n"
+        "Content beyond this is silently truncated and risks become generic or incomplete. "
+        "If your diff is large, split by file or logical group and call `/diff-summary` once per chunk:\n"
+        "```bash\n"
+        "# Per-file: scope the diff\n"
+        "git diff HEAD -- src/auth/middleware.py   # one call\n"
+        "git diff HEAD -- src/api/routes.py        # separate call\n\n"
+        "# Or by directory\n"
+        "git diff HEAD -- src/auth/\n"
+        "git diff HEAD -- src/api/\n"
+        "```\n"
+        "Merge the `risks` and `test_recommendations` arrays from each call — "
+        "each chunk produces independent findings.\n\n"
+        "**What it returns:**\n"
+        "- `summary` — what changed and why it matters\n"
+        "- `risks` — concrete regression or breakage risks (empty list = low risk)\n"
+        "- `test_recommendations` — specific things to verify, not generic advice\n"
+        "- `files_touched` — deterministic list extracted from diff headers\n\n"
+        "Call after every set of edits before returning to the user.\n\n"
 
         "### POST /vector-search\n"
         'Model: embeddings. `{"query": "auth session middleware", "limit": 8}` → ranked chunks · `vector-<slug>.md`\n'
-        "Requires `/index` to have been run. Check `vector_ready` in `/health` first.\n\n"
+        "Embeds the query with Ollama, searches Supabase pgvector, and returns matching repo or artifact-memory chunks. "
+        "Requires `/index` to have been run for repo-code search. Check `vector_ready` in `/health` first.\n\n"
 
         "### POST /index\n"
         'Model: embeddings. `{"paths": ["ascendvent/checkin-ascendvent/src/app", "ascendvent/checkin-ascendvent/src/lib"], "force": false}`\n'
@@ -411,6 +467,9 @@ async def setup():
         "All output written to `~/Library/Application Support/context-store/artifacts/`. Read the file — don't just use the API response.\n\n"
         "| File | Endpoint | Re-use if |\n"
         "|---|---|---|\n"
+        "| `events.jsonl` | structured ledger | debugging, recovery, replay |\n"
+        "| `records/<event_id>.json` | `/context`, agents | durable source of truth |\n"
+        "| `markdown/<event_id>.md` | `/context`, agents | rendered view of structured record |\n"
         "| `context-bundle.md` | `/context` | same task this session |\n"
         "| `routes.md` | `/routes` | routes unchanged |\n"
         "| `scan-<slug>.md` | `/scan` | same path, no code changes |\n"
@@ -421,6 +480,8 @@ async def setup():
         "| `draft-<slug>.md` | `/draft` | re-draft if output unsatisfactory |\n"
         "| `scaffold-<slug>.md` | `/scaffold` | re-scaffold individual files if needed |\n\n"
         "**Always verify actual source files before editing** — output files are scout reports, not ground truth.\n"
+        "Vectors are created with Ollama embeddings and stored in Supabase as a rebuildable search index. "
+        "Do not treat Supabase vector rows as the canonical record of a run.\n"
         "\n---\n\n"
 
         "## Worked examples\n\n"
@@ -434,6 +495,16 @@ async def setup():
         "5. Apply with Write/Edit  →  POST /draft on route.ts if needed\n"
         "6. POST /diff-summary  →  read risks + test recommendations\n"
         "```\n\n"
+        "**Issue audit delegation (/agents/issue-auditor/run):**\n"
+        "```\n"
+        "Task: audit issue completion from repo evidence\n\n"
+        "1. POST /agents/issue-auditor/run  →  receive {run_id, status: 'running'}\n"
+        "2. GET /agents/issue-auditor/status/{run_id}  →  poll until status != 'running'\n"
+        "3. Read findings and artifacts.record (JSON path)\n"
+        "4. Verify evidence files before closing or commenting on issues\n"
+        "5. Use GitHub tooling only after the senior agent confirms recommendations\n"
+        "```\n\n"
+
         "**Multi-file delegation (/scaffold):**\n"
         "```\n"
         "Task: scaffold a notifications feature (3 new files)\n\n"
@@ -447,7 +518,8 @@ async def setup():
         "\n---\n\n"
 
         "## Adding this to a project permanently\n\n"
-        "Add to the project's `CLAUDE.md`:\n\n"
+
+        "### Claude Code — add to `CLAUDE.md`\n\n"
         "```\n"
         "## Context Engine\n\n"
         f"Local context scout and code delegation layer at {base}.\n\n"
@@ -457,7 +529,38 @@ async def setup():
         "After edits: POST /diff-summary with git diff output, read risks.\n"
         "Scout is read-only — you own all file writes.\n"
         f"If {base}/healthcheck returns non-200, proceed without it.\n"
-        "```\n"
+        "```\n\n"
+
+        "### Codex CLI — add to `~/.codex/AGENTS.md` (global) or `AGENTS.md` in project root\n\n"
+        "```markdown\n"
+        "## Local Context Engine\n\n"
+        f"A local read-only context scout and junior developer service is available at `{base}`.\n\n"
+        "Use it for non-trivial repository work when it is reachable. It retrieves relevant code,\n"
+        "performs semantic search with local embeddings, summarizes changes, and can draft mechanical\n"
+        "edits. It never writes to a repository. You own architecture decisions, review every draft,\n"
+        "and apply every file change yourself.\n\n"
+        "**Availability:** check `GET /healthcheck`. If non-200 or unreachable, continue without it.\n\n"
+        f"**Full integration protocol:** `GET {base}/setup`\n\n"
+        f"**Path convention:** REPO_ROOT is `{repo}`. Every path/file value must include the\n"
+        "`<owner>/<repo>/` prefix. Never pass bare `.` or an absolute path.\n\n"
+        "**Sandbox access rules:** Codex runs in a sandboxed environment where localhost connections\n"
+        "can hang or be blocked mid-stream even when the service is healthy. Always follow these rules:\n"
+        "- Use `curl -4` (force IPv4) for all context engine calls\n"
+        "- Keep calls sequential — no parallel curl calls\n"
+        "- Use short `--max-time` values: 10s for lightweight endpoints, 20s for `/vector-search` and `/context`\n"
+        "- If a call hangs or is blocked, fall back to direct file reads rather than stalling the task\n"
+        "- Do not treat the engine as broken unless `/healthcheck` fails outside the sandbox\n\n"
+        "**Standard workflow:**\n"
+        "1. `POST /context` before any non-trivial task — read `context-bundle.md`\n"
+        "2. Inspect actual source files before deciding\n"
+        "3. `POST /draft` or `/scaffold` only for clearly specified mechanical work — review before applying\n"
+        "4. After edits: `git diff HEAD | ...` → `POST /diff-summary` — read risks\n"
+        "```\n\n"
+
+        "### Qwen Code — add to `~/.qwen/AGENTS.md` (global) or `AGENTS.md` in project root\n\n"
+        "Qwen Code follows the same AGENTS.md convention as Codex CLI. Use the identical block above,\n"
+        "placed in `~/.qwen/AGENTS.md` for global scope or a project-level `AGENTS.md` for repo scope.\n"
+        "Qwen Code picks up `AGENTS.md` from the working directory and from its config home.\n"
         "\n---\n"
         f"_context-engine · repo: `{repo}` · {base}_\n"
     )
@@ -473,7 +576,9 @@ async def scan(req: ScanRequest):
     """
     t0 = time.monotonic()
     log.debug("POST /scan path=%s", req.path or "/")
-    base = safe_resolve(req.path) if req.path else config.REPO_ROOT
+    if not req.path or req.path in (".", "/"):
+        raise HTTPException(status_code=400, detail="path must be scoped to a subdirectory — bare '.' or empty string would scan all of REPO_ROOT")
+    base = safe_resolve(req.path)
     if not base.exists():
         raise HTTPException(status_code=404, detail=f"Path not found: {req.path!r}")
 
@@ -689,12 +794,15 @@ async def context(req: ContextRequest):
     """
     t0 = time.monotonic()
     log.debug("POST /context task=%r paths=%s", req.task, req.paths)
-    result = await build_context(
-        task=req.task,
-        paths=req.paths,
-        focus=req.focus,
-        use_vector=req.use_vector,
-    )
+    try:
+        result = await build_context(
+            task=req.task,
+            paths=req.paths,
+            focus=req.focus,
+            use_vector=req.use_vector,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
     written = mw.write_context(
         task=req.task,
@@ -703,19 +811,203 @@ async def context(req: ContextRequest):
         risks=result["risks"],
         suggested_files=result["suggested_files"],
         vector_hits=result["vector_hits"],
+        audit_table=result.get("audit_table", []),
+        warnings=result.get("warnings", []),
+        dropped_candidates=result.get("dropped_candidates", []),
     )
+    markdown_content = ""
+    try:
+        markdown_content = Path(written).read_text(encoding="utf-8")
+    except Exception:
+        pass
+
+    response_payload = {
+        "task":               req.task,
+        "files":              result["files"],
+        "summary":            result["summary"],
+        "risks":              result["risks"],
+        "suggested_files":    result["suggested_files"],
+        "vector_hits":        [h.get("path", "") for h in result["vector_hits"]],
+        "audit_table":        result.get("audit_table", []),
+        "warnings":           result.get("warnings", []),
+        "dropped_candidates": result.get("dropped_candidates", []),
+        "scope":              result.get("scope", []),
+        "written_to":         written,
+    }
+    artifacts = artifact_store.write_record(
+        tool="context",
+        request=req.model_dump(),
+        response=response_payload,
+        markdown=markdown_content or None,
+    )
+    response_payload["artifacts"] = artifacts
 
     asyncio.create_task(supabase_vector.store_artifact(written))
     log.debug("POST /context done files=%d vector_hits=%d dur=%.2fs", len(result["files"]), len(result["vector_hits"]), time.monotonic() - t0)
-    return {
-        "task":            req.task,
-        "files":           result["files"],
-        "summary":         result["summary"],
-        "risks":           result["risks"],
-        "suggested_files": result["suggested_files"],
-        "vector_hits":     [h.get("path", "") for h in result["vector_hits"]],
-        "written_to":      written,
+    return response_payload
+
+
+async def _run_issue_audit_background(
+    run_id: str,
+    req: IssueAuditRequest,
+    scoped_paths: list[str],
+    task: str,
+) -> None:
+    """Background worker for /agents/issue-auditor/run. Overwrites the pending record when done."""
+    try:
+        result = await build_context(
+            task=task,
+            paths=scoped_paths,
+            focus=req.focus + req.requirements,
+            use_vector=req.use_vector,
+            force_issue_audit=True,
+        )
+        evidence_matrix = collect_agent_evidence(scoped_paths)
+        deterministic_findings = findings_from_evidence(evidence_matrix, _issue_numbers(task, req.focus))
+
+        written = mw.write_context(
+            task=task,
+            files=result["files"],
+            summary=result["summary"],
+            risks=result["risks"],
+            suggested_files=result["suggested_files"],
+            vector_hits=result["vector_hits"],
+            audit_table=deterministic_findings or result.get("audit_table", []),
+            warnings=result.get("warnings", []),
+            dropped_candidates=result.get("dropped_candidates", []),
+        )
+        markdown_content = ""
+        try:
+            markdown_content = Path(written).read_text(encoding="utf-8")
+        except Exception:
+            pass
+
+        if deterministic_findings:
+            findings = deterministic_findings
+        elif scoped_paths:
+            findings = insufficient_evidence_findings(_issue_numbers(task, req.focus))
+        else:
+            findings = result.get("audit_table", [])
+        run_status = "complete" if findings else "insufficient_evidence"
+        warnings = list(result.get("warnings", []))
+
+        response_payload = {
+            "run_id":          run_id,
+            "status":          run_status,
+            "findings":        findings,
+            "evidence_matrix": evidence_matrix,
+            "suggested_files": result["suggested_files"],
+            "warnings":        warnings,
+        }
+        artifacts = artifact_store.write_record(
+            event_id=run_id,
+            tool="agents/issue-auditor",
+            request=req.model_dump(),
+            response=response_payload,
+            markdown=markdown_content or None,
+            status=run_status,
+        )
+
+        # Await so upsert failures surface in the stored record's warnings
+        vector_warnings = await supabase_vector.store_artifact_record(artifacts["record"], source_type="agent_run")
+        if vector_warnings:
+            warnings.extend(vector_warnings)
+            response_payload["warnings"] = warnings
+            artifact_store.write_record(
+                event_id=run_id,
+                tool="agents/issue-auditor",
+                request=req.model_dump(),
+                response=response_payload,
+                markdown=markdown_content or None,
+                status=run_status,
+            )
+
+        asyncio.create_task(supabase_vector.store_artifact(written))
+        log.debug("issue-auditor background done run_id=%s findings=%d warnings=%d",
+                  run_id, len(findings), len(warnings))
+    except Exception:
+        log.error("issue-auditor background error run_id=%s\n%s", run_id, traceback.format_exc())
+        artifact_store.write_record(
+            event_id=run_id,
+            tool="agents/issue-auditor",
+            request=req.model_dump(),
+            response={"run_id": run_id, "status": "error", "findings": [], "evidence_matrix": [],
+                      "suggested_files": [], "warnings": ["background task failed — check logs"]},
+            status="error",
+        )
+
+
+@app.post("/agents/issue-auditor/run", response_model=IssueAuditResponse)
+async def issue_auditor(req: IssueAuditRequest, background_tasks: BackgroundTasks):
+    """
+    Agentified issue audit workflow — returns immediately with run_id and status "running".
+
+    Poll GET /agents/issue-auditor/status/{run_id} until status is no longer "running".
+    The model call and evidence collection run in the background.
+    Codex/Claude still owns final decisions and any GitHub writes.
+    """
+    scoped_paths = []
+    for path in req.paths:
+        clean = path.strip().strip("/")
+        if clean.startswith(f"{req.repo.strip().strip('/')}/"):
+            scoped_paths.append(clean)
+        else:
+            scoped_paths.append(f"{req.repo.strip().strip('/')}/{clean}")
+
+    task = req.task
+    if req.requirements:
+        task += "\nRequirements:\n" + "\n".join(f"- {item}" for item in req.requirements)
+    task += "\nReturn an issue audit table with issue, status, evidence_files, missing_evidence, recommendation."
+
+    pending = artifact_store.write_pending_record(
+        tool="agents/issue-auditor",
+        request=req.model_dump(),
+    )
+    run_id = pending["event_id"]
+    background_tasks.add_task(_run_issue_audit_background, run_id, req, scoped_paths, task)
+
+    log.debug("POST /agents/issue-auditor/run queued run_id=%s", run_id)
+    return IssueAuditResponse(
+        run_id=run_id,
+        status="running",
+        findings=[],
+        evidence_matrix=[],
+        suggested_files=[],
+        warnings=[],
+        artifacts=pending,
+    )
+
+
+@app.get("/agents/issue-auditor/status/{run_id}")
+async def issue_auditor_status(run_id: str):
+    """
+    Poll the status of a queued issue audit run.
+
+    Returns the same shape as /agents/issue-auditor/run once complete.
+    Status values: "running" | "complete" | "insufficient_evidence" | "error"
+    """
+    import json as _json
+    if not all(c.isalnum() or c == "-" for c in run_id):
+        raise HTTPException(status_code=400, detail="invalid run_id format")
+    record_path = config.OUTPUT_DIR / "records" / f"{run_id}.json"
+    if not record_path.exists():
+        raise HTTPException(status_code=404, detail=f"run_id {run_id!r} not found")
+    record = _json.loads(record_path.read_text(encoding="utf-8"))
+    resp = dict(record.get("response") or {})
+    resp["run_id"] = run_id
+    resp["status"] = record.get("status", "unknown")
+    resp.setdefault("findings",        [])
+    resp.setdefault("evidence_matrix", [])
+    resp.setdefault("suggested_files", [])
+    resp.setdefault("warnings",        [])
+    markdown_path = config.OUTPUT_DIR / "markdown" / f"{run_id}.md"
+    resp["artifacts"] = {
+        "event_id":  run_id,
+        "record":    str(record_path),
+        "markdown":  str(markdown_path) if markdown_path.exists() else None,
+        "event_log": str(config.OUTPUT_DIR / "events.jsonl"),
     }
+    return resp
 
 
 # ── Diff Summary ───────────────────────────────────────────────────────────────
@@ -725,24 +1017,38 @@ async def diff_summary(req: DiffRequest):
     """
     Summarize a git diff: changes, risks, test recommendations.
     Writes: /output/diff-{hash}.md
+    Always writes an artifact — including on model error or timeout.
     """
     t0 = time.monotonic()
     log.debug("POST /diff-summary diff_len=%d", len(req.diff))
-    result  = await review_diff(req.diff)
+    result = await review_diff(req.diff)
+
+    t_artifact = time.monotonic()
     written = mw.write_diff(
         summary=result["summary"],
         risks=result["risks"],
         files_touched=result["files_touched"],
         test_recs=result["test_recommendations"],
     )
+    artifact_ms = int((time.monotonic() - t_artifact) * 1000)
+
+    timing = {**result["timing_ms"], "artifact_write": artifact_ms, "total": int((time.monotonic() - t0) * 1000)}
+
+    if result["model_error"]:
+        log.warning("POST /diff-summary model_error diff_len=%d model_ms=%d written=%s",
+                    len(req.diff), result["timing_ms"]["model"], written)
+    else:
+        log.debug("POST /diff-summary done files=%d model_ms=%d total_ms=%d written=%s",
+                  len(result["files_touched"]), result["timing_ms"]["model"], timing["total"], written)
 
     asyncio.create_task(supabase_vector.store_artifact(written))
-    log.debug("POST /diff-summary done files=%d dur=%.2fs", len(result["files_touched"]), time.monotonic() - t0)
     return {
         "summary":              result["summary"],
         "risks":                result["risks"],
         "files_touched":        result["files_touched"],
         "test_recommendations": result["test_recommendations"],
+        "model_error":          result["model_error"],
+        "timing_ms":            timing,
         "written_to":           written,
     }
 

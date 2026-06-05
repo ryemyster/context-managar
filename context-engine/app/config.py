@@ -14,7 +14,7 @@ OLLAMA_EMBED_MODEL  = os.getenv("OLLAMA_EMBED_MODEL",  "nomic-embed-text")
 
 # Inference settings — tuned for 3b code model (~3.6s) / 9b reasoning on M3 16GB
 OLLAMA_TIMEOUT        = 120.0   # seconds; 3b on M3 completes in ~3-15s typical
-OLLAMA_REASON_TIMEOUT = 600.0   # reasoning model cold-load + generation on M3 Docker can take 3-5 min
+OLLAMA_REASON_TIMEOUT = 1200.0  # qwen3.5:9b benchmarks at 14m33s on M3 — 20 min covers cold-load + generation
 OLLAMA_NUM_CTX        = 4096    # 3b at 4096 ctx = ~2.4GB total — fine on 16GB M3
 OLLAMA_NUM_PREDICT    = 400     # max output tokens for code model
 OLLAMA_REASON_PREDICT = 1024    # reasoning model needs room for chain-of-thought
@@ -31,6 +31,7 @@ MAX_FILE_BYTES       = int(os.getenv("MAX_FILE_BYTES",       "32768"))   # 32 KB
 MAX_FILES_PER_SCAN   = int(os.getenv("MAX_FILES_PER_SCAN",   "80"))
 MAX_SNIPPETS_PER_QUERY = int(os.getenv("MAX_SNIPPETS_PER_QUERY", "20"))
 MAX_TOTAL_CHARS      = 3_500   # ~875 tokens — safe for 2048 ctx with prompt overhead
+DIFF_MAX_CHARS       = 8_000   # ~2000 tokens — diff budget (4096 ctx - 1024 output - overhead)
 
 # ── Supabase ───────────────────────────────────────────────────────────────────
 SUPABASE_URL              = os.getenv("SUPABASE_URL",              "")

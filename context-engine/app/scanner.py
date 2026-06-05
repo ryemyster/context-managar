@@ -27,7 +27,7 @@ async def scan_directory(path: str = "") -> dict:
     Returns file list, summary, patterns, dependencies.
     """
     t0 = time.monotonic()
-    base = safe_resolve(path) if path else config.REPO_ROOT
+    base = safe_resolve(path)
     log.debug("scan start path=%s max_files=%d", base, config.MAX_FILES_PER_SCAN)
 
     files = walk_repo(base)

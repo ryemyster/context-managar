@@ -3,7 +3,7 @@ models.py — Pydantic request/response models for all endpoints.
 """
 
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 # ── Requests ───────────────────────────────────────────────────────────────────
@@ -23,12 +23,28 @@ class SummarizeRequest(BaseModel):
 
 class ContextRequest(BaseModel):
     task: str
-    paths: list[str] = ["."]
+    paths: list[str] = []
     focus: list[str] = []
     use_vector: bool = False   # opt-in — adds embed+model swap latency; only useful after /index
 
+    @field_validator("paths")
+    @classmethod
+    def paths_must_be_scoped(cls, v: list[str]) -> list[str]:
+        for p in v:
+            if not p or p in (".", "/"):
+                raise ValueError(f"path {p!r} is too broad — must be scoped to a subdirectory (e.g. 'owner/repo/src')")
+        return v
+
 class DiffRequest(BaseModel):
     diff: str
+
+class IssueAuditRequest(BaseModel):
+    task: str
+    repo: str
+    paths: list[str]
+    focus: list[str] = []
+    requirements: list[str] = []
+    use_vector: bool = False
 
 class VectorSearchRequest(BaseModel):
     query: str
@@ -118,13 +134,28 @@ class ContextResponse(BaseModel):
     risks: list[str]
     suggested_files: list[str]
     vector_hits: list[str]
+    audit_table: list[dict] = []
+    warnings: list[str] = []
+    dropped_candidates: list[dict] = []
+    artifacts: dict = {}
     written_to: str
+
+class IssueAuditResponse(BaseModel):
+    run_id: str
+    status: str
+    findings: list[dict]
+    evidence_matrix: list[dict] = []
+    suggested_files: list[str]
+    warnings: list[str]
+    artifacts: dict
 
 class DiffResponse(BaseModel):
     summary: str
     risks: list[str]
     files_touched: list[str]
     test_recommendations: list[str]
+    model_error: bool
+    timing_ms: dict
     written_to: str
 
 class VectorSearchResponse(BaseModel):

@@ -80,6 +80,7 @@ async def generate_reasoning(prompt: str) -> str:
                 "model":  config.OLLAMA_REASON_MODEL,
                 "prompt": prompt,
                 "stream": False,
+                "think":  False,
                 "options": {
                     "temperature":   0.2,
                     "num_predict":   config.OLLAMA_REASON_PREDICT,

@@ -28,7 +28,7 @@ def safe_resolve(rel_path: str) -> Path:
 def rel_path(path: Path) -> str:
     """Return path as string relative to REPO_ROOT."""
     try:
-        return str(path.relative_to(config.REPO_ROOT))
+        return str(path.resolve().relative_to(config.REPO_ROOT.resolve()))
     except ValueError:
         return str(path)
 

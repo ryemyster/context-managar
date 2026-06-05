@@ -208,6 +208,74 @@ async def store_artifact(file_path: str) -> None:
         log.warning("store_artifact failed path=%s: %s", file_path, e)
 
 
+async def store_artifact_record(record_path: str, *, source_type: str = "artifact") -> list[str]:
+    """
+    Index a canonical artifact JSON record into the vector store.
+    Returns a list of warning strings for any upsert failures (empty on full success).
+
+    The vector table is still a derived cache. The path is namespaced so artifact
+    memory can be distinguished from repo code chunks even before a richer vector
+    schema is introduced.
+    """
+    warnings: list[str] = []
+    if not await is_available():
+        return warnings
+    try:
+        from pathlib import Path
+        import json
+        from . import ollama_client
+
+        path = Path(record_path)
+        if not path.exists():
+            return warnings
+
+        raw = path.read_text(encoding="utf-8")
+        if not raw.strip():
+            return warnings
+
+        try:
+            record = json.loads(raw)
+        except Exception:
+            record = {}
+
+        event_id = record.get("event_id") or path.stem
+        tool = record.get("tool") or "unknown"
+        vector_path = f"{source_type}://{tool}/{event_id}"
+        searchable = json.dumps(
+            {
+                "source_type": source_type,
+                "event_id": event_id,
+                "tool": tool,
+                "status": record.get("status"),
+                "request": record.get("request"),
+                "response": record.get("response"),
+            },
+            sort_keys=True,
+            default=str,
+        )
+
+        chunks = _chunk_text(searchable)
+        for chunk in chunks:
+            if not chunk.strip():
+                continue
+            h = chunk_hash(vector_path, chunk)
+            if await already_indexed(h):
+                continue
+            embedding = await ollama_client.embed(f"{vector_path}\n{chunk}")
+            if embedding:
+                ok = await upsert_chunk(vector_path, chunk, embedding)
+                if not ok:
+                    msg = f"vector upsert failed for {vector_path}"
+                    warnings.append(msg)
+                    log.warning("store_artifact_record upsert failed path=%s", vector_path)
+        log.debug("store_artifact_record done path=%s chunks=%d warnings=%d", vector_path, len(chunks), len(warnings))
+    except Exception as e:
+        msg = f"store_artifact_record failed for {record_path}: {e}"
+        warnings.append(msg)
+        log.warning("store_artifact_record failed path=%s: %s", record_path, e)
+    return warnings
+
+
 def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
     chunks, start = [], 0
     while start < len(text):
