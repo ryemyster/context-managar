@@ -35,6 +35,8 @@ class AgentResult:
     # "final_answer" | "max_iterations" | "timeout" | "model_error"
     stopped_reason: str = "final_answer"
     message_history: list[dict] = field(default_factory=list)
+    memory_context_used: bool = False
+    memory_hits: int = 0
 
 
 def _coerce_arguments(raw) -> dict:
@@ -83,11 +85,15 @@ async def run_agent(
     ]
 
     # Pre-flight: inject prior memory context so the model starts informed.
-    # search_memory is called unconditionally here (not as a model tool call) so
-    # the model always gets relevant prior runs even if it wouldn't call it itself.
-    memory_ctx = await _preflight_memory(task)
-    if memory_ctx:
-        messages[1]["content"] = task + "\n\n" + memory_ctx
+    # Only runs when search_memory is in the allowed tool set (tools=None means all tools).
+    memory_ctx = ""
+    memory_hits = 0
+    _search_memory_allowed = tools is None or "search_memory" in tools
+    if _search_memory_allowed:
+        memory_ctx = await _preflight_memory(task)
+        if memory_ctx:
+            memory_hits = memory_ctx.count("---") + 1  # separator count → hit count
+            messages[1]["content"] = task + "\n\n" + memory_ctx
 
     tool_calls_made: list[dict] = []
     t_start = time.monotonic()
@@ -95,8 +101,8 @@ async def run_agent(
     stopped_reason = "max_iterations"
     iterations_done = 0
 
-    log.info("agent_runner start task_len=%d tools=%d max_iter=%d memory=%s",
-             len(task), len(tool_defs), max_iter, "yes" if memory_ctx else "no")
+    log.info("agent_runner start task_len=%d tools=%d max_iter=%d memory=%s hits=%d",
+             len(task), len(tool_defs), max_iter, "yes" if memory_ctx else "no", memory_hits)
 
     for i in range(max_iter):
         iterations_done = i + 1
@@ -157,6 +163,8 @@ async def run_agent(
         tool_calls_made=tool_calls_made,
         stopped_reason=stopped_reason,
         message_history=messages,
+        memory_context_used=bool(memory_ctx),
+        memory_hits=memory_hits,
     )
 
 

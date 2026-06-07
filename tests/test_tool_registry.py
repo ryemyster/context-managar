@@ -260,8 +260,20 @@ async def test_search_memory_missing_query():
 
 
 @pytest.mark.asyncio
+async def test_search_memory_skips_embed_when_vector_unavailable():
+    with patch("app.tool_registry.supabase_vector.is_available", new_callable=AsyncMock,
+               return_value=False), \
+         patch("app.tool_registry.ollama_client.embed", new_callable=AsyncMock) as mock_embed:
+        result = await execute_tool("search_memory", {"query": "route handlers"})
+    assert "[no memory found" in result
+    mock_embed.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_search_memory_embed_failure():
-    with patch("app.tool_registry.ollama_client.embed", new_callable=AsyncMock,
+    with patch("app.tool_registry.supabase_vector.is_available", new_callable=AsyncMock,
+               return_value=True), \
+         patch("app.tool_registry.ollama_client.embed", new_callable=AsyncMock,
                side_effect=Exception("Ollama down")):
         result = await execute_tool("search_memory", {"query": "route handlers"})
     assert "[error: search_memory failed" in result
@@ -270,7 +282,9 @@ async def test_search_memory_embed_failure():
 
 @pytest.mark.asyncio
 async def test_search_memory_no_results():
-    with patch("app.tool_registry.ollama_client.embed", new_callable=AsyncMock,
+    with patch("app.tool_registry.supabase_vector.is_available", new_callable=AsyncMock,
+               return_value=True), \
+         patch("app.tool_registry.ollama_client.embed", new_callable=AsyncMock,
                return_value=[0.1] * 768), \
          patch("app.tool_registry.supabase_vector.search", new_callable=AsyncMock,
                return_value=[]):
@@ -284,7 +298,9 @@ async def test_search_memory_returns_formatted_results():
         {"path": "artifact://agents/run/abc123", "chunk": "route handlers: /scan /find /context", "similarity": 0.87},
         {"path": "ryemyster/context-manager/context-engine/app/main.py", "chunk": "@app.post('/scan')", "similarity": 0.72},
     ]
-    with patch("app.tool_registry.ollama_client.embed", new_callable=AsyncMock,
+    with patch("app.tool_registry.supabase_vector.is_available", new_callable=AsyncMock,
+               return_value=True), \
+         patch("app.tool_registry.ollama_client.embed", new_callable=AsyncMock,
                return_value=[0.1] * 768), \
          patch("app.tool_registry.supabase_vector.search", new_callable=AsyncMock,
                return_value=fake_results):
@@ -304,7 +320,9 @@ async def test_search_memory_limit_capped_at_10():
         captured["limit"] = limit
         return []
 
-    with patch("app.tool_registry.ollama_client.embed", new_callable=AsyncMock,
+    with patch("app.tool_registry.supabase_vector.is_available", new_callable=AsyncMock,
+               return_value=True), \
+         patch("app.tool_registry.ollama_client.embed", new_callable=AsyncMock,
                return_value=[0.1] * 768), \
          patch("app.tool_registry.supabase_vector.search", side_effect=fake_search):
         await execute_tool("search_memory", {"query": "test", "limit": 99})

@@ -91,6 +91,39 @@ async def test_run_agent_calls_tool_and_continues():
     assert len(result.tool_calls_made) == 1
     assert result.tool_calls_made[0]["name"] == "health_check"
     mock_exec.assert_called_once_with("health_check", {})
+    assert result.memory_context_used is False
+    assert result.memory_hits == 0
+
+
+@pytest.mark.asyncio
+async def test_run_agent_preflight_skipped_when_search_memory_not_in_tools():
+    """When tools list excludes search_memory, preflight is not called."""
+    final_msg = {"role": "assistant", "content": "Done.", "tool_calls": []}
+
+    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value="some memory") as mock_preflight:
+        mock_chat.return_value = final_msg
+        result = await run_agent("Scan code", tools=["scan_directory", "read_file"], max_iterations=1)
+
+    mock_preflight.assert_not_called()
+    assert result.memory_context_used is False
+
+
+@pytest.mark.asyncio
+async def test_run_agent_memory_context_used_when_preflight_returns_content():
+    """memory_context_used=True and memory_hits>0 when preflight finds results."""
+    final_msg = {"role": "assistant", "content": "Done.", "tool_calls": []}
+    preflight_result = "Prior memory\n[0.87] some/path\nsome chunk\n\n---\n\n[0.72] other/path\nother chunk"
+
+    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=preflight_result):
+        mock_chat.return_value = final_msg
+        result = await run_agent("Find route handlers", max_iterations=1)
+
+    assert result.memory_context_used is True
+    assert result.memory_hits == 2
 
 
 @pytest.mark.asyncio

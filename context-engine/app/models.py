@@ -211,3 +211,5 @@ class AgentRunResponse(BaseModel):
     stopped_reason: str = ""
     warnings: list[str] = []
     artifacts: dict = {}
+    memory_context_used: bool = False
+    memory_hits: int = 0

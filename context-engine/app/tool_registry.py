@@ -300,6 +300,8 @@ async def _exec_search_memory(arguments: dict) -> str:
         return "[error: 'query' is required]"
     limit = min(int(arguments.get("limit", 5)), 10)
     try:
+        if not await supabase_vector.is_available():
+            return "[no memory found for this query]"
         embedding = await ollama_client.embed(query)
         results = await supabase_vector.search(embedding, limit=limit, threshold=0.3)
     except Exception as exc:
