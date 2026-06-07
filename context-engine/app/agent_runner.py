@@ -20,7 +20,8 @@ from .logger import log
 _DEFAULT_SYSTEM_PROMPT = (
     "You are a code analysis agent with tools to explore a software repository. "
     "Use tools to gather real evidence before drawing conclusions — do not guess. "
-    "Recommended call order: scan_directory → find_in_code or grep → read_file. "
+    "Recommended call order: search_memory (check prior runs first) → scan_directory → find_in_code or grep → read_file. "
+    "Always call search_memory first — if a similar task was run before, use those results as a starting point. "
     "When you have enough evidence, provide a final answer without calling more tools. "
     f"Repository root: {config.REPO_ROOT}"
 )
@@ -80,13 +81,22 @@ async def run_agent(
         {"role": "system", "content": system},
         {"role": "user",   "content": task},
     ]
+
+    # Pre-flight: inject prior memory context so the model starts informed.
+    # search_memory is called unconditionally here (not as a model tool call) so
+    # the model always gets relevant prior runs even if it wouldn't call it itself.
+    memory_ctx = await _preflight_memory(task)
+    if memory_ctx:
+        messages[1]["content"] = task + "\n\n" + memory_ctx
+
     tool_calls_made: list[dict] = []
     t_start = time.monotonic()
     final_answer  = ""
     stopped_reason = "max_iterations"
     iterations_done = 0
 
-    log.info("agent_runner start task_len=%d tools=%d max_iter=%d", len(task), len(tool_defs), max_iter)
+    log.info("agent_runner start task_len=%d tools=%d max_iter=%d memory=%s",
+             len(task), len(tool_defs), max_iter, "yes" if memory_ctx else "no")
 
     for i in range(max_iter):
         iterations_done = i + 1
@@ -155,3 +165,15 @@ def _last_assistant_content(messages: list[dict]) -> str:
         if msg.get("role") == "assistant" and msg.get("content"):
             return msg["content"]
     return ""
+
+
+async def _preflight_memory(task: str) -> str:
+    """Query prior memory for the task and return formatted context, or empty string if none."""
+    try:
+        result = await tool_registry.execute_tool("search_memory", {"query": task, "limit": 3})
+        if result.startswith("[no memory") or result.startswith("[error"):
+            return ""
+        return f"[Prior memory — relevant results from past runs]\n{result}"
+    except Exception as exc:
+        log.debug("agent_runner preflight_memory failed: %s", exc)
+        return ""

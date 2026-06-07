@@ -409,7 +409,7 @@ async def setup():
         "Returns the JSON schemas for all tools the junior can call. "
         "Any calling agent reads this to know exactly what the junior is capable of — no hardcoding required. "
         "Schema format is OpenAI/Ollama/MCP-compatible.\n"
-        "Available tools: `scan_directory`, `find_in_code`, `read_file`, `grep`, `health_check`.\n\n"
+        "Available tools: `scan_directory`, `find_in_code`, `read_file`, `grep`, `health_check`, `search_memory`.\n\n"
 
         "### POST /context — use before every non-trivial task\n"
         "Model: code. Scans only requested paths, greps focus terms in scope, optionally runs vector search, "
@@ -1411,7 +1411,7 @@ async def tools_call(req: ToolCallRequest):
     Execute a single tool by name. Used by the MCP wrapper and any caller that
     wants direct tool access without going through the full agent loop.
 
-    Available tools: scan_directory, find_in_code, read_file, grep, health_check
+    Available tools: scan_directory, find_in_code, read_file, grep, health_check, search_memory
     Returns: {"name": str, "result": str}
     """
     result = await tool_registry.execute_tool(req.name, req.arguments)

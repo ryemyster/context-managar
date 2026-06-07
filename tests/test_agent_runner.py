@@ -79,7 +79,8 @@ async def test_run_agent_calls_tool_and_continues():
 
     with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
-         patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec:
+         patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""):
         mock_chat.side_effect = [tool_call_msg, final_msg]
         mock_exec.return_value = "health: ok (HTTP 200)"
 

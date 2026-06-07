@@ -248,3 +248,65 @@ async def test_health_check_connection_error():
     with patch("httpx.get", side_effect=httpx.ConnectError("refused")):
         result = await execute_tool("health_check", {})
     assert "[health_check error:" in result
+
+
+# ── search_memory executor ─────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_search_memory_missing_query():
+    result = await execute_tool("search_memory", {})
+    assert "[error:" in result
+    assert "query" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_search_memory_embed_failure():
+    with patch("app.tool_registry.ollama_client.embed", new_callable=AsyncMock,
+               side_effect=Exception("Ollama down")):
+        result = await execute_tool("search_memory", {"query": "route handlers"})
+    assert "[error: search_memory failed" in result
+    assert "Ollama down" in result
+
+
+@pytest.mark.asyncio
+async def test_search_memory_no_results():
+    with patch("app.tool_registry.ollama_client.embed", new_callable=AsyncMock,
+               return_value=[0.1] * 768), \
+         patch("app.tool_registry.supabase_vector.search", new_callable=AsyncMock,
+               return_value=[]):
+        result = await execute_tool("search_memory", {"query": "something never seen before"})
+    assert "[no memory found" in result
+
+
+@pytest.mark.asyncio
+async def test_search_memory_returns_formatted_results():
+    fake_results = [
+        {"path": "artifact://agents/run/abc123", "chunk": "route handlers: /scan /find /context", "similarity": 0.87},
+        {"path": "ryemyster/context-manager/context-engine/app/main.py", "chunk": "@app.post('/scan')", "similarity": 0.72},
+    ]
+    with patch("app.tool_registry.ollama_client.embed", new_callable=AsyncMock,
+               return_value=[0.1] * 768), \
+         patch("app.tool_registry.supabase_vector.search", new_callable=AsyncMock,
+               return_value=fake_results):
+        result = await execute_tool("search_memory", {"query": "route handlers"})
+
+    assert "[0.87]" in result
+    assert "artifact://agents/run/abc123" in result
+    assert "route handlers: /scan /find /context" in result
+    assert "---" in result  # separator between chunks
+
+
+@pytest.mark.asyncio
+async def test_search_memory_limit_capped_at_10():
+    captured = {}
+
+    async def fake_search(embedding, limit, threshold):
+        captured["limit"] = limit
+        return []
+
+    with patch("app.tool_registry.ollama_client.embed", new_callable=AsyncMock,
+               return_value=[0.1] * 768), \
+         patch("app.tool_registry.supabase_vector.search", side_effect=fake_search):
+        await execute_tool("search_memory", {"query": "test", "limit": 99})
+
+    assert captured["limit"] == 10

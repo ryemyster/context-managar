@@ -22,7 +22,7 @@ OLLAMA_REASON_PREDICT = 1024    # reasoning model needs room for chain-of-though
 # Agentic loop settings
 OLLAMA_AGENT_TIMEOUT        = float(os.getenv("OLLAMA_AGENT_TIMEOUT",        "600.0"))  # 10 min total wall-clock budget per agent run
 AGENT_MAX_ITERATIONS        = int(os.getenv("AGENT_MAX_ITERATIONS",          "10"))     # max think→act cycles before forced stop
-AGENT_TOOL_RESULT_MAX_CHARS = int(os.getenv("AGENT_TOOL_RESULT_MAX_CHARS",   "800"))    # truncate tool results to protect context window
+AGENT_TOOL_RESULT_MAX_CHARS = int(os.getenv("AGENT_TOOL_RESULT_MAX_CHARS",   "3000"))   # truncate tool results to protect context window
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 REPO_ROOT  = Path(os.getenv("REPO_ROOT",   "/repo")).resolve()
@@ -32,7 +32,7 @@ OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR",  "/output")).resolve()
 ARTIFACTS_MAX_MB = int(os.getenv("ARTIFACTS_MAX_MB", "50"))
 
 # ── Scan limits ────────────────────────────────────────────────────────────────
-MAX_FILE_BYTES       = int(os.getenv("MAX_FILE_BYTES",       "32768"))   # 32 KB per file
+MAX_FILE_BYTES       = int(os.getenv("MAX_FILE_BYTES",       "262144"))  # 256 KB per file
 MAX_FILES_PER_SCAN   = int(os.getenv("MAX_FILES_PER_SCAN",   "80"))
 MAX_SNIPPETS_PER_QUERY = int(os.getenv("MAX_SNIPPETS_PER_QUERY", "20"))
 MAX_TOTAL_CHARS      = 3_500   # ~875 tokens — safe for 2048 ctx with prompt overhead

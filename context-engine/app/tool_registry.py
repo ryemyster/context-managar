@@ -23,7 +23,7 @@ from typing import Callable
 
 from fastapi import HTTPException
 
-from . import config
+from . import config, ollama_client, supabase_vector
 from .logger import log
 from .repo_reader import read_file as _read_file
 from .repo_reader import rel_path, safe_resolve, walk_repo
@@ -169,6 +169,34 @@ _HEALTH_SCHEMA = {
     },
 }
 
+_SEARCH_MEMORY_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "search_memory",
+        "description": (
+            "Search indexed artifacts and prior agent run results from memory. "
+            "Call this FIRST when starting a task that may have been investigated before — "
+            "before calling scan_directory or find_in_code. "
+            "Returns matching chunks with similarity scores from prior runs, summaries, and indexed code. "
+            "If results are found, use them as a starting point instead of re-scanning from scratch."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural-language description of what you are looking for.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results to return. Default: 5. Max: 10.",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
 
 # ── Executors ──────────────────────────────────────────────────────────────────
 
@@ -217,8 +245,11 @@ async def _exec_read_file(arguments: dict) -> str:
         return f"[error: path rejected — {e.detail}. Expected format: 'owner/repo/path/to/file.py', got '{file}']"
     except Exception as e:
         return f"[error: {e}]"
-    content = _read_file(resolved)
-    if content is None:
+    # When paging past the first block, request enough bytes to cover the offset.
+    # repo_reader caps at MAX_FILE_BYTES (32KB) by default — too small for large files.
+    needed_bytes = max(config.MAX_FILE_BYTES, (offset + int(limit or 200)) * 300)
+    content = _read_file(resolved, max_bytes=min(needed_bytes, 2_000_000))
+    if not content:
         return f"[error: file not found or unreadable: '{file}']"
     lines = content.splitlines()
     start = max(0, offset - 1)
@@ -263,14 +294,34 @@ async def _exec_health_check(arguments: dict) -> str:
         return f"[health_check error: {e}]"
 
 
+async def _exec_search_memory(arguments: dict) -> str:
+    query = arguments.get("query", "").strip()
+    if not query:
+        return "[error: 'query' is required]"
+    limit = min(int(arguments.get("limit", 5)), 10)
+    try:
+        embedding = await ollama_client.embed(query)
+        results = await supabase_vector.search(embedding, limit=limit, threshold=0.3)
+    except Exception as exc:
+        return f"[error: search_memory failed — {exc}]"
+    if not results:
+        return "[no memory found for this query]"
+    parts = [
+        f"[{r['similarity']:.2f}] {r['path']}\n{r['chunk']}"
+        for r in results
+    ]
+    return _truncate("\n\n---\n\n".join(parts))
+
+
 # ── Registry ───────────────────────────────────────────────────────────────────
 
 _REGISTRY: dict[str, tuple[dict, Callable]] = {
-    "scan_directory": (_SCAN_SCHEMA,  _exec_scan_directory),
-    "find_in_code":   (_FIND_SCHEMA,  _exec_find_in_code),
-    "read_file":      (_READ_SCHEMA,  _exec_read_file),
-    "grep":           (_GREP_SCHEMA,  _exec_grep),
-    "health_check":   (_HEALTH_SCHEMA, _exec_health_check),
+    "scan_directory": (_SCAN_SCHEMA,        _exec_scan_directory),
+    "find_in_code":   (_FIND_SCHEMA,        _exec_find_in_code),
+    "read_file":      (_READ_SCHEMA,        _exec_read_file),
+    "grep":           (_GREP_SCHEMA,        _exec_grep),
+    "health_check":   (_HEALTH_SCHEMA,      _exec_health_check),
+    "search_memory":  (_SEARCH_MEMORY_SCHEMA, _exec_search_memory),
 }
 
 ALL_TOOLS: list[str] = list(_REGISTRY.keys())
