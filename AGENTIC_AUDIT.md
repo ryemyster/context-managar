@@ -12,16 +12,16 @@ This repo implements a real but narrow read-only repository-analysis agent loop 
 | Capability | Present? | Evidence | Notes |
 |---|---:|---|---|
 | Model calls | Yes | `context-engine/app/ollama_client.py:33`, `context-engine/app/ollama_client.py:68`, `context-engine/app/ollama_client.py:129` | Uses Ollama generate, reasoning generate, embeddings, and chat-with-tools. |
-| Tool use | Yes | `context-engine/app/tool_registry.py:268`, `context-engine/app/main.py:1408` | Five repo-analysis tools are registered and callable directly. |
-| Model-selected tools | Yes | `context-engine/app/agent_runner.py:102`, `context-engine/app/agent_runner.py:115`, `context-engine/app/agent_runner.py:129` | The model receives tool schemas and chooses tool calls. |
-| Planning | Partial | `context-engine/app/agent_runner.py:20`, `context-engine/app/agent_runner.py:79` | The prompt gives a recommended call order, but there is no explicit plan object or plan update mechanism. |
-| Observation loop | Yes | `context-engine/app/agent_runner.py:122`, `context-engine/app/agent_runner.py:135` | Tool results are fed back as `tool` messages. |
+| Tool use | Yes | `context-engine/app/tool_registry.py:419`, `context-engine/app/main.py:1408` | Seven repo-analysis tools registered and callable: scan_directory, find_in_code, read_file, grep, health_check, search_memory, update_plan. |
+| Model-selected tools | Yes | `context-engine/app/agent_runner.py:123`, `context-engine/app/agent_runner.py:134`, `context-engine/app/agent_runner.py:154` | The model receives tool schemas and chooses tool calls. |
+| Planning | Yes | `context-engine/app/tool_registry.py:228`, `context-engine/app/agent_runner.py:114`, `context-engine/app/agent_runner.py:164` | `update_plan` tool lets the model record goal, steps, current_step, and blockers as first-class state; captured in `AgentResult.plan_state` and surfaced in the API response. |
+| Observation loop | Yes | `context-engine/app/agent_runner.py:155`, `context-engine/app/agent_runner.py:170` | Tool results (as `ToolResult` envelopes) are serialized and fed back as `tool` messages. |
 | Multi-step autonomy | Yes | `context-engine/app/agent_runner.py:91`, `context-engine/app/config.py:22` | Iterates up to configured iteration and time budgets. |
-| Durable memory | Partial | `context-engine/app/artifact_store.py:45`, `context-engine/app/artifact_store.py:89`, `context-engine/app/supabase_vector.py:211` | Runs and artifacts are persisted; generic agent loop does not automatically retrieve prior memories. |
+| Durable memory | Yes | `context-engine/app/artifact_store.py:45`, `context-engine/app/tool_registry.py:380`, `context-engine/app/agent_runner.py:106` | `search_memory` tool queries vector-indexed prior runs; preflight auto-injects memory context before the first model call when not scope-denied. |
 | Context retrieval | Yes | `context-engine/app/context_builder.py:170`, `context-engine/app/context_builder.py:202`, `context-engine/app/tool_registry.py:191` | Deterministic grep, vector search, and model-callable code search/read tools. |
 | External mutation | Partial | `context-engine/app/artifact_store.py:64`, `context-engine/app/supabase_vector.py:126` | Mutates output artifacts and Supabase vector table only; repo mount is read-only. |
-| HITL / permissions | Partial | `context-engine/app/main.py:73`, `context-engine/app/repo_reader.py:14`, `docker-compose.yml:35` | Optional API key, path traversal guard, read-only repo volume. No per-action human approval gates. |
-| Error recovery | Partial | `context-engine/app/agent_runner.py:104`, `context-engine/app/tool_registry.py:287`, `context-engine/app/supabase_vector.py:7` | Errors are returned to the model or degraded, but no structured retry classification or compensating behavior. |
+| HITL / permissions | Partial | `context-engine/app/main.py:73`, `context-engine/app/repo_reader.py:14`, `docker-compose.yml:35` | Optional API key, path traversal guard, read-only repo volume, tool-scope enforcement via `allowed_scopes`. No per-action human approval gates. |
+| Error recovery | Yes | `context-engine/app/tool_registry.py:39`, `context-engine/app/agent_runner.py:58` | `ToolResult` envelopes carry `ok`, `error_type`, `retryable`, and `recovery_hint`; serialized into model messages so the model can reason about retry vs. give up. |
 | Evaluation/reflection | Partial | `context-engine/app/diff_reviewer.py:26`, `context-engine/app/issue_auditor.py:112` | Diff review and deterministic issue-audit classification exist; no agent self-critique loop. |
 
 ## Execution Topology
@@ -93,21 +93,21 @@ flowchart TD
 | Tool Context | Context Injection | Present | `context-engine/app/context_builder.py:271`, `context-engine/app/main.py:1282`, `context-engine/app/main.py:1342` | Relevant repo snippets/context files are injected into model prompts. |
 | Tool Context | Context Boundary | Present | `context-engine/app/models.py:30`, `context-engine/app/repo_reader.py:14`, `docker-compose.yml:35` | Scoped path validation and read-only repo mount constrain context/actions. |
 | Tool Resilience | Recovery Guide | Present | `context-engine/app/tool_registry.py:178`, `context-engine/app/tool_registry.py:217`, `context-engine/app/main.py:1195` | Error strings tell callers expected formats or next setup steps. |
-| Tool Resilience | Error Classification | Partial | `context-engine/app/agent_runner.py:104`, `context-engine/app/main.py:1543` | Stop reasons distinguish timeout/model_error/max_iterations, but tool errors are plain strings. |
+| Tool Resilience | Error Classification | Present | `context-engine/app/tool_registry.py:39`, `context-engine/app/agent_runner.py:58` | `ToolResult` envelopes classify every tool error: `error_type` (`path_rejected` \| `not_found` \| `invalid_input` \| `engine_down` \| `scope_denied`), `retryable` flag, and `recovery_hint`. |
 | Tool Resilience | Confirmation Request | Absent |  | Ambiguous inputs are rejected or defaulted; no clarification protocol. |
 | Tool Resilience | Fuzzy Match Threshold | Partial | `context-engine/app/models.py:49`, `context-engine/app/supabase_vector.py:144` | Vector similarity threshold exists; not used for confirmation/fuzzy entity resolution. |
 | Tool Resilience | Graceful Degradation | Present | `context-engine/app/supabase_vector.py:7`, `context-engine/app/main.py:1142`, `context-engine/app/main.py:1151` | Vector/Supabase failures return empty results rather than crashing. |
 | Tool Resilience | Fallback Tool | Partial | `context-engine/app/tool_registry.py:75`, `context-engine/app/tool_registry.py:136` | Descriptions suggest alternatives, but fallback is not automated. |
 | Tool Security | Secret Injection | Present | `context-engine/app/config.py:41`, `docker-compose.yml:29` | Supabase credentials come from environment/config. |
 | Tool Security | Permission Gate | Present | `context-engine/app/main.py:73`, `context-engine/app/repo_reader.py:14` | Optional API key and path traversal guard. |
-| Tool Security | Scope Declaration | Absent |  | No OAuth/API scope declarations per tool. |
+| Tool Security | Scope Declaration | Present | `context-engine/app/tool_registry.py:49`, `context-engine/app/tool_registry.py:444` | `ToolMeta.scopes` declares per-tool capability requirements; `execute_tool()` enforces `allowed_scopes` and returns `scope_denied` ToolResult when not met. |
 | Tool Security | Audit Trail | Present | `context-engine/app/artifact_store.py:70`, `context-engine/app/logger.py`, `context-engine/app/agent_runner.py:127` | Event log, request IDs, and tool-call traces are stored/logged. |
 | Compositional | Tool Gateway | Present | `context-engine/mcp_server.py:3`, `context-engine/app/main.py:1408` | REST and MCP expose a unified facade over tool backends. |
 | Compositional | Tool Adapter | Present | `context-engine/mcp_server.py:58`, `context-engine/mcp_server.py:80` | MCP adapter wraps REST tools for editors. |
 | Compositional | Canonical Tool Model | Partial | `context-engine/app/tool_registry.py:40`, `context-engine/mcp_server.py:67` | OpenAI/Ollama-like schemas are converted to MCP; no versioned shared contract object. |
 | Compositional | Tool Versioning | Absent |  | No coexistence of multiple tool versions found. |
 
-Collapsed absent patterns: Mutual Exclusivity, Transactional Boundary, Compensation Handler, GUI URL, Confirmation Request, Scope Declaration, Tool Versioning.
+Collapsed absent patterns: Mutual Exclusivity, Transactional Boundary, Compensation Handler, GUI URL, Confirmation Request, Tool Versioning.
 
 ## Pattern Score
 - Tool: 2
@@ -117,31 +117,31 @@ Collapsed absent patterns: Mutual Exclusivity, Transactional Boundary, Compensat
 - Tool Execution: 2
 - Tool Output: 2
 - Tool Context: 2
-- Tool Resilience: 2
-- Tool Security: 2
+- Tool Resilience: 3  *(+1: Error Classification upgraded Partial→Present)*
+- Tool Security: 3   *(+1: Scope Declaration upgraded Absent→Present)*
 - Compositional: 2
 
-Total: 20/30
+Total: 22/30  *(was 20)*
 
 Interpretation:
 Solid agentic tool design.
 
 ## Agenticity Score
 - Goal representation: 1
-- Planning: 1
+- Planning: 2  *(+1: explicit plan state via update_plan + plan_state on AgentResult)*
 - Dynamic tool selection: 3
 - Observation/action loop: 3
-- Persistent memory: 2
+- Persistent memory: 3  *(+1: search_memory preflight auto-injects prior run memory)*
 - Context retrieval: 3
 - Autonomy: 2
-- Error recovery: 1
+- Error recovery: 2  *(+1: ToolResult envelopes with error_type + retryable)*
 - External action capability: 1
 - Evaluation/reflection: 1
 
-Total: 18/30
+Total: 21/30  *(was 18)*
 
 Interpretation:
-Agentic workflow.
+Agentic workflow — stronger than before.
 
 ## What Makes It Agentic
 - `run_agent()` represents the user task as a message history, gives the model available tool definitions, and lets the model decide whether to call tools or answer (`context-engine/app/agent_runner.py:79`, `context-engine/app/agent_runner.py:102`, `context-engine/app/agent_runner.py:115`).
@@ -152,12 +152,21 @@ Agentic workflow.
 
 ## What Makes It A Wrapper
 - Many endpoints are fixed application workflows with one prompt-response model call after deterministic preprocessing, such as `/find`, `/context`, `/diff-summary`, `/draft`, and `/scaffold` (`context-engine/app/main.py:681`, `context-engine/app/context_builder.py:258`, `context-engine/app/diff_reviewer.py:26`, `context-engine/app/main.py:1258`).
-- Planning is mostly prompt guidance and ordinary code flow; there is no explicit plan data structure, replanning step, or task decomposition object.
-- The model-callable tool surface is read-only and narrow: scan, find, read, grep, health (`context-engine/app/tool_registry.py:268`).
-- Stored artifacts can be indexed, but the generic agent loop does not automatically search prior run memory before acting.
+- Many endpoints are fixed application workflows with one prompt-response model call after deterministic preprocessing.
+- The model-callable tool surface is read-only and narrow: scan, find, read, grep, health, memory, plan (`context-engine/app/tool_registry.py:419`).
+- External mutations are mostly local artifact writes and Supabase vector upserts, not arbitrary action execution or repo changes.
 - External mutations are mostly local artifact writes and Supabase vector upserts, not arbitrary action execution or repo changes.
 
 ## Pattern Gaps
+
+**Resolved gaps (implemented):**
+
+- ~~Scope Declaration~~ — **Done.** `ToolMeta.scopes` per tool; `execute_tool()` enforces `allowed_scopes`; `AgentRunRequest.allowed_scopes` threads through to every tool call.
+- ~~Memory Retrieval In Agent Loop~~ — **Done.** `search_memory` tool over artifact records/vector hits; `_preflight_memory()` auto-injects prior run context; `memory_context_used` and `memory_hits` surfaced in response.
+- ~~Structured Tool Error Envelopes~~ — **Done.** `ToolResult` dataclass: `ok`, `error_type`, `retryable`, `recovery_hint`; serialized into model messages for retry reasoning.
+
+**Open gaps:**
+
 - Missing pattern: Confirmation Request
   - Why it matters: The agent currently returns errors or defaults broadly when inputs are ambiguous.
   - Where it would fit: `tool_registry.execute_tool()` and path/query tools.
@@ -168,27 +177,17 @@ Agentic workflow.
   - Where it would fit: `_run_agent_background()` and `_run_issue_audit_background()`.
   - Minimal implementation suggestion: Write to temp files first, commit JSON/Markdown together, then append the event log as the final durable marker.
 
-- Missing pattern: Scope Declaration
-  - Why it matters: Tools do not declare whether they need repo read, artifact write, vector write, network, or admin credentials.
-  - Where it would fit: Tool schema metadata in `tool_registry.py`.
-  - Minimal implementation suggestion: Add non-model-enforced metadata such as `required_scopes: ["repo:read"]` and enforce it in `execute_tool()`.
-
 - Missing pattern: Tool Versioning
   - Why it matters: External MCP clients consume schemas that may change without compatibility guarantees.
   - Where it would fit: `/agents/tools`, MCP `tools/list`, and the `_REGISTRY` keys.
   - Minimal implementation suggestion: Add schema versions and stable aliases, for example `read_file.v1`, while keeping current names as compatibility aliases.
 
-- Missing pattern: Memory Retrieval In Agent Loop
-  - Why it matters: Durable records are stored and indexed, but prior results do not automatically influence later `/agents/run` behavior.
-  - Where it would fit: `agent_runner.run_agent()` or a new `search_memory` tool.
-  - Minimal implementation suggestion: Add a read-only `search_memory` tool over artifact records/vector hits and recommend it before repo scans for repeated tasks.
-
 ## Control Flow Assessment
 - Who chooses the next action: In `/agents/run`, the model chooses among exposed tools or final answer. In most other endpoints, ordinary code chooses the sequence and the model only synthesizes text/JSON.
 - Can the system continue across multiple steps without a new user request: Yes, within one background agent run until final answer, timeout, model error, or max iterations.
-- Can it observe outcomes and revise its plan: Partially. It observes tool outputs and can choose another tool call, but there is no explicit plan revision data model.
-- Can it write state that changes later behavior: Partially. It writes durable artifacts and vector records; later deterministic/vector endpoints can use indexed data, but `/agents/run` does not currently retrieve memory automatically.
-- Are tool patterns mature enough to support reliable agency: Adequate for read-only repo scouting. They are not mature enough for high-risk mutation workflows because there are no transactional semantics, confirmation protocol, per-tool scopes, or compensation handlers.
+- Can it observe outcomes and revise its plan: Yes. It observes tool outputs and can choose another tool call; the `update_plan` tool lets the model explicitly revise goal, steps, and blockers as first-class state persisted in `AgentResult.plan_state`.
+- Can it write state that changes later behavior: Yes. Artifacts and vector records are persisted; `search_memory` preflight automatically retrieves that memory before the next run's first model call.
+- Are tool patterns mature enough to support reliable agency: Adequate for read-only repo scouting. They are not mature enough for high-risk mutation workflows because there are no transactional semantics, confirmation protocol, or compensation handlers.
 
 ## Final Verdict
 This repo is best described as an agentic workflow because it has a genuine model-driven tool loop with observations, iteration, run IDs, durable traces, and context retrieval, but its autonomy is scoped to read-only repository analysis and much of the product remains deterministic LLM endpoint orchestration rather than a full goal-pursuing AI agent.
@@ -198,9 +197,9 @@ For this repo's stated use case, the current architectural direction is appropri
 
 This should not be pushed toward a broad mutation-capable autonomous agent yet. The safer and higher-leverage path is to harden the existing agentic workflow:
 
-1. Add a `search_memory` tool so `/agents/run` can retrieve prior artifact records and vector-indexed run history automatically.
-2. Replace plain-string tool results with structured envelopes such as `ok`, `error_type`, `retryable`, `data`, and `recovery_hint`.
-3. Add tool scope metadata such as `repo:read`, `artifact:write`, and `vector:write`, then enforce those scopes in `execute_tool()`.
+1. ~~Add a `search_memory` tool~~ — **Done.** `search_memory` tool + `_preflight_memory()` auto-injection; `memory_context_used`/`memory_hits` in response.
+2. ~~Replace plain-string tool results with structured envelopes~~ — **Done.** `ToolResult`: `ok`, `error_type`, `retryable`, `data`, `recovery_hint`; all 7 executors updated.
+3. ~~Add tool scope metadata and enforce in `execute_tool()`~~ — **Done.** `ToolMeta.scopes` + `allowed_scopes` enforcement; `scope_denied` error type.
 4. Add confirmation or clarification behavior for ambiguous paths, broad searches, and uncertain matches.
 5. Version tool schemas before external MCP/editor clients depend on them heavily.
 

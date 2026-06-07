@@ -395,21 +395,37 @@ async def setup():
         "```json\n"
         '{  "task": "Find all route handlers in ryemyster/context-manager/context-engine/app and list them with their HTTP methods",\n'
         '   "tools": [],\n'
-        '   "max_iterations": 10  }\n'
+        '   "max_iterations": 10,\n'
+        '   "allowed_scopes": null  }\n'
         "```\n"
         "- `tools`: empty = all tools enabled. Restrict to `[\"scan_directory\", \"read_file\"]` to limit scope.\n"
         "- `max_iterations`: default 10. Increase for complex multi-file tasks.\n"
         "- `system_prompt`: optional — override the default system prompt.\n"
-        "Poll response fields: `final_answer` (the agent's conclusion), `tool_calls_made` (what it called and why), "
-        "`iterations`, `stopped_reason` (`final_answer` | `max_iterations` | `timeout` | `model_error`).\n\n"
+        "- `allowed_scopes`: optional — `null` = all scopes permitted. Pass a list to cap capabilities:\n"
+        "  - `\"repo:read\"` — scan_directory, find_in_code, read_file, grep\n"
+        "  - `\"memory:read\"` — search_memory\n"
+        "  - `\"engine:read\"` — health_check\n"
+        "  - `update_plan` is always available — it has no scope requirement.\n"
+        "  - Example: `[\"repo:read\"]` allows only file exploration; memory and health tools are scope-denied.\n\n"
+        "Poll response fields:\n"
+        "- `final_answer` — the agent's conclusion\n"
+        "- `tool_calls_made` — list of `{name, arguments, result}` — what it called and saw\n"
+        "- `iterations`, `stopped_reason` (`final_answer` | `max_iterations` | `timeout` | `model_error`)\n"
+        "- `memory_context_used` — `true` if prior memory was injected into the task context\n"
+        "- `memory_hits` — number of memory chunks that were injected\n"
+        "- `plan_state` — last `update_plan` call captured as `{goal, steps, current_step, blockers}`; empty `{}` if the agent never called it\n\n"
         "**Key proof of agentic behavior:** check `tool_calls_made` — non-empty means the agent actually explored "
         "the repo autonomously, not just generated text.\n\n"
+        "**Expected tool call order:** `search_memory → update_plan → scan_directory → find_in_code or grep → read_file`\n\n"
 
         "### GET /agents/tools — tool manifest for agent discovery\n"
-        "Returns the JSON schemas for all tools the junior can call. "
+        "Returns the JSON schemas for all tools the junior can call, including `scopes` and `side_effects` per tool. "
         "Any calling agent reads this to know exactly what the junior is capable of — no hardcoding required. "
         "Schema format is OpenAI/Ollama/MCP-compatible.\n"
-        "Available tools: `scan_directory`, `find_in_code`, `read_file`, `grep`, `health_check`, `search_memory`.\n\n"
+        "Available tools: `scan_directory`, `find_in_code`, `read_file`, `grep`, `health_check`, `search_memory`, `update_plan`.\n\n"
+        "Each tool entry includes:\n"
+        "- `scopes`: capability gates — `repo:read`, `memory:read`, `engine:read`, or `[]` (always available)\n"
+        "- `side_effects`: `false` for all current tools — they are all read-only\n\n"
 
         "### POST /context — use before every non-trivial task\n"
         "Model: code. Scans only requested paths, greps focus terms in scope, optionally runs vector search, "

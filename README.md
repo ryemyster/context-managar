@@ -139,10 +139,16 @@ Interactive API docs: http://localhost:8088/docs
 The engine runs a think → act loop:
 
 1. Receives a task via `POST /agents/run`
-2. Calls `qwen3.5:9b` with tool definitions (scan_directory, find_in_code, read_file, grep, health_check)
-3. Model calls tools → results are fed back as observations
-4. Loops until the model produces a final answer, or hits max_iterations / timeout
-5. Result persisted to Supabase + disk; poll `GET /agents/run/status/{run_id}` for completion
+2. Pre-flight: auto-injects prior memory from `search_memory` (if not scope-restricted)
+3. Calls `qwen3.5:9b` with tool definitions: `search_memory`, `update_plan`, `scan_directory`, `find_in_code`, `read_file`, `grep`, `health_check`
+4. Model calls tools → `ToolResult` envelopes (ok, error_type, retryable, recovery_hint) fed back as observations
+5. Model may call `update_plan` to record its goal and steps as first-class plan state
+6. Loops until the model produces a final answer, or hits max_iterations / timeout
+7. Result persisted to Supabase + disk; poll `GET /agents/run/status/{run_id}` for completion
+
+Response includes: `final_answer`, `tool_calls_made`, `iterations`, `stopped_reason`, `memory_context_used`, `memory_hits`, `plan_state`
+
+**Scope restriction:** pass `allowed_scopes: ["repo:read"]` to limit the agent to file-exploration tools only; `memory:read` and `engine:read` tools will return `scope_denied`. `update_plan` always runs regardless of scopes.
 
 **MCP callers (Zed, Cursor, etc.)** talk to `mcp_server.py` which is a thin stdio adapter that translates MCP JSON-RPC 2.0 to the same REST endpoints. No separate process — the engine keeps running independently.
 
