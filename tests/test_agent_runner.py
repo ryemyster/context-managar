@@ -12,7 +12,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'context-engine'))
 
 from unittest.mock import AsyncMock, patch, MagicMock
-from app.agent_runner import AgentResult, _coerce_arguments, run_agent
+from app.agent_runner import AgentResult, _coerce_arguments, run_agent, _verify_answer
 from app.tool_registry import ToolResult
 
 
@@ -340,3 +340,147 @@ async def test_run_agent_scope_denied_serialized_to_model():
     tool_messages = [m for m in result.message_history if m.get("role") == "tool"]
     assert len(tool_messages) == 1
     assert "scope_denied" in tool_messages[0]["content"]
+
+
+# ── _verify_answer ─────────────────────────────────────────────────────────────
+
+_GOOD_VERIFICATION = (
+    '{"passed": true, "rationale": "Answer matches evidence.", '
+    '"unsupported_claims": [], "evidence_gap": false}'
+)
+_FAIL_VERIFICATION = (
+    '{"passed": false, "rationale": "No tool evidence for claim X.", '
+    '"unsupported_claims": ["claim X"], "evidence_gap": true}'
+)
+
+
+@pytest.mark.asyncio
+async def test_verify_answer_passed():
+    """Happy path — model returns passed=true."""
+    with patch("app.agent_runner.ollama_client.generate_reasoning", new_callable=AsyncMock) as mock_gen, \
+         patch("app.agent_runner.ollama_client.parse_json_response",
+               return_value={"passed": True, "rationale": "Answer matches evidence.",
+                             "unsupported_claims": [], "evidence_gap": False}):
+        mock_gen.return_value = _GOOD_VERIFICATION
+        result = await _verify_answer(
+            task="Find routes",
+            final_answer="There are 3 routes.",
+            tool_calls_made=[{"name": "scan_directory", "result": "found 3 .py files"}],
+            plan_state={"goal": "Find routes"},
+        )
+
+    assert result["passed"] is True
+    assert isinstance(result["rationale"], str)
+    assert isinstance(result["unsupported_claims"], list)
+    assert result["evidence_gap"] is False
+
+
+@pytest.mark.asyncio
+async def test_verify_answer_failed_with_unsupported_claims():
+    """Verifier returns passed=false with unsupported claims."""
+    with patch("app.agent_runner.ollama_client.generate_reasoning", new_callable=AsyncMock) as mock_gen, \
+         patch("app.agent_runner.ollama_client.parse_json_response",
+               return_value={"passed": False, "rationale": "No evidence for claim X.",
+                             "unsupported_claims": ["claim X"], "evidence_gap": True}):
+        mock_gen.return_value = _FAIL_VERIFICATION
+        result = await _verify_answer(
+            task="Find routes",
+            final_answer="There are 3 routes and a websocket handler.",
+            tool_calls_made=[],
+            plan_state={},
+        )
+
+    assert result["passed"] is False
+    assert "claim X" in result["unsupported_claims"]
+    assert result["evidence_gap"] is True
+
+
+@pytest.mark.asyncio
+async def test_verify_answer_parse_failure_degrades_gracefully():
+    """When the model returns non-JSON, result has passed=None and error=parse_failed."""
+    with patch("app.agent_runner.ollama_client.generate_reasoning", new_callable=AsyncMock) as mock_gen, \
+         patch("app.agent_runner.ollama_client.parse_json_response", return_value={}):
+        mock_gen.return_value = "Sorry, I cannot determine this."
+        result = await _verify_answer("task", "answer", [], {})
+
+    assert result["passed"] is None
+    assert result["error"] == "parse_failed"
+
+
+@pytest.mark.asyncio
+async def test_verify_answer_exception_returns_unavailable():
+    """When generate_reasoning raises, result has passed=None and error=verifier_unavailable."""
+    with patch("app.agent_runner.ollama_client.generate_reasoning",
+               new_callable=AsyncMock, side_effect=RuntimeError("connection refused")):
+        result = await _verify_answer("task", "answer", [], {})
+
+    assert result["passed"] is None
+    assert result["error"] == "verifier_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_verify_answer_uses_plan_goal_when_present():
+    """Verifier uses plan_state.goal rather than task when available."""
+    captured_prompts = []
+
+    async def capture_gen(prompt: str) -> str:
+        captured_prompts.append(prompt)
+        return _GOOD_VERIFICATION
+
+    with patch("app.agent_runner.ollama_client.generate_reasoning", side_effect=capture_gen), \
+         patch("app.agent_runner.ollama_client.parse_json_response",
+               return_value={"passed": True, "rationale": "ok", "unsupported_claims": [], "evidence_gap": False}):
+        await _verify_answer(
+            task="generic task",
+            final_answer="answer",
+            tool_calls_made=[],
+            plan_state={"goal": "specific goal from update_plan"},
+        )
+
+    assert "specific goal from update_plan" in captured_prompts[0]
+    assert "generic task" not in captured_prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_verification_populated_on_final_answer():
+    """When run_agent stops with final_answer, verification dict is populated."""
+    final_msg = {"role": "assistant", "content": "Routes are in main.py.", "tool_calls": []}
+
+    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
+         patch("app.agent_runner.ollama_client.generate_reasoning", new_callable=AsyncMock) as mock_gen, \
+         patch("app.agent_runner.ollama_client.parse_json_response",
+               return_value={"passed": True, "rationale": "Good.", "unsupported_claims": [], "evidence_gap": False}):
+        mock_chat.return_value = final_msg
+        mock_gen.return_value = _GOOD_VERIFICATION
+
+        result = await run_agent("Find routes", max_iterations=1)
+
+    assert result.stopped_reason == "final_answer"
+    assert result.verification.get("passed") is True
+    assert isinstance(result.verification.get("rationale"), str)
+
+
+@pytest.mark.asyncio
+async def test_run_agent_verification_empty_on_max_iterations():
+    """When run_agent stops at max_iterations, verification is not run — stays empty."""
+    tool_call_msg = {
+        "role": "assistant",
+        "content": "Thinking...",
+        "tool_calls": [{"function": {"name": "health_check", "arguments": {}}}],
+    }
+
+    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
+         patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
+         patch("app.agent_runner.ollama_client.generate_reasoning", new_callable=AsyncMock) as mock_gen:
+        mock_chat.return_value = tool_call_msg
+        mock_exec.return_value = ToolResult(ok=True, data="ok")
+
+        result = await run_agent("Any task", max_iterations=2)
+
+    assert result.stopped_reason == "max_iterations"
+    assert result.verification == {}
+    mock_gen.assert_not_called()

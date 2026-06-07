@@ -215,3 +215,4 @@ class AgentRunResponse(BaseModel):
     memory_context_used: bool = False
     memory_hits: int = 0
     plan_state: dict = {}
+    verification: dict = {}

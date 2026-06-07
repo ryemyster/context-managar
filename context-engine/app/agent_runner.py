@@ -40,6 +40,7 @@ class AgentResult:
     memory_context_used: bool = False
     memory_hits: int = 0
     plan_state: dict = field(default_factory=dict)
+    verification: dict = field(default_factory=dict)
 
 
 def _coerce_arguments(raw) -> dict:
@@ -179,6 +180,11 @@ async def run_agent(
         # for-loop exhausted without break → max_iterations hit
         final_answer = _last_assistant_content(messages) or f"[agent completed {max_iter} iterations without a conclusive answer]"
 
+    verification: dict = {}
+    if stopped_reason == "final_answer" and final_answer:
+        verification = await _verify_answer(task, final_answer, tool_calls_made, plan_state)
+        log.info("agent_runner verifier passed=%s", verification.get("passed"))
+
     log.info("agent_runner done stopped=%s iterations=%d tool_calls=%d dur=%.1fs",
              stopped_reason, iterations_done, len(tool_calls_made), time.monotonic() - t_start)
 
@@ -191,7 +197,58 @@ async def run_agent(
         memory_context_used=bool(memory_ctx),
         memory_hits=memory_hits,
         plan_state=plan_state,
+        verification=verification,
     )
+
+
+async def _verify_answer(
+    task: str,
+    final_answer: str,
+    tool_calls_made: list[dict],
+    plan_state: dict,
+) -> dict:
+    """
+    Post-hoc coherence check: does the final answer follow from the tool evidence?
+    Never raises — returns {"passed": None, "error": "verifier_unavailable"} on any failure.
+    """
+    goal = plan_state.get("goal") or task
+
+    evidence_lines = [f"- {tc['name']}: {tc['result'][:200]}" for tc in tool_calls_made]
+    evidence_block = "\n".join(evidence_lines)
+    if len(evidence_block) > 1500:
+        evidence_block = evidence_block[:1500] + "\n[truncated]"
+    if not evidence_block:
+        evidence_block = "(no tool calls were made)"
+
+    prompt = (
+        "You are an evidence evaluator for an AI agent. "
+        "Check whether the final answer is coherent with the task goal and supported by the tool evidence.\n\n"
+        f"GOAL: {goal}\n\n"
+        f"TOOL EVIDENCE:\n{evidence_block}\n\n"
+        f"FINAL ANSWER:\n{final_answer}\n\n"
+        "Return JSON only — no explanation outside the object:\n"
+        "{\n"
+        '  "passed": true | false,\n'
+        '  "rationale": "one sentence explaining the verdict",\n'
+        '  "unsupported_claims": ["claim that lacks evidence"],\n'
+        '  "evidence_gap": true | false\n'
+        "}"
+    )
+
+    try:
+        raw = await ollama_client.generate_reasoning(prompt)
+        parsed = ollama_client.parse_json_response(raw)
+        if not parsed or "passed" not in parsed:
+            return {"passed": None, "error": "parse_failed", "raw": raw[:200]}
+        return {
+            "passed":             bool(parsed.get("passed")),
+            "rationale":          str(parsed.get("rationale", "")),
+            "unsupported_claims": list(parsed.get("unsupported_claims") or []),
+            "evidence_gap":       bool(parsed.get("evidence_gap", False)),
+        }
+    except Exception as exc:
+        log.debug("agent_runner verifier failed: %s", exc)
+        return {"passed": None, "error": "verifier_unavailable"}
 
 
 def _last_assistant_content(messages: list[dict]) -> str:

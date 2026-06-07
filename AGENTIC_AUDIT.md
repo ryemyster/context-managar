@@ -22,7 +22,7 @@ This repo implements a real but narrow read-only repository-analysis agent loop 
 | External mutation | Partial | `context-engine/app/artifact_store.py:64`, `context-engine/app/supabase_vector.py:126` | Mutates output artifacts and Supabase vector table only; repo mount is read-only. |
 | HITL / permissions | Partial | `context-engine/app/main.py:73`, `context-engine/app/repo_reader.py:14`, `docker-compose.yml:35` | Optional API key, path traversal guard, read-only repo volume, tool-scope enforcement via `allowed_scopes`. No per-action human approval gates. |
 | Error recovery | Yes | `context-engine/app/tool_registry.py:39`, `context-engine/app/agent_runner.py:58` | `ToolResult` envelopes carry `ok`, `error_type`, `retryable`, and `recovery_hint`; serialized into model messages so the model can reason about retry vs. give up. |
-| Evaluation/reflection | Partial | `context-engine/app/diff_reviewer.py:26`, `context-engine/app/issue_auditor.py:112` | Diff review and deterministic issue-audit classification exist; no agent self-critique loop. |
+| Evaluation/reflection | Present | `context-engine/app/diff_reviewer.py:26`, `context-engine/app/issue_auditor.py:112`, `context-engine/app/agent_runner.py:204` | Diff review, issue-audit classification, and post-hoc answer verifier exist. `_verify_answer()` checks coherence between final answer and tool evidence using `generate_reasoning()`; result surfaced in `AgentResult.verification`. |
 
 ## Execution Topology
 ```mermaid
@@ -46,7 +46,8 @@ flowchart TD
   REG --> OBS[tool result as observation]
   OBS --> LOOP
   TC -->|no| FINAL[final_answer]
-  FINAL --> ART
+  FINAL --> VFY[_verify_answer: generate_reasoning coherence check]
+  VFY --> ART
   ART --> VEC
   API --> STATUS[GET /agents/run/status/{run_id}]
 ```
@@ -136,9 +137,9 @@ Solid agentic tool design.
 - Autonomy: 2
 - Error recovery: 2  *(+1: ToolResult envelopes with error_type + retryable)*
 - External action capability: 1
-- Evaluation/reflection: 1
+- Evaluation/reflection: 2  *(+1: _verify_answer() post-hoc coherence check on every final_answer stop)*
 
-Total: 21/30  *(was 18)*
+Total: 22/30  *(was 21)*
 
 Interpretation:
 Agentic workflow — stronger than before.
@@ -164,6 +165,7 @@ Agentic workflow — stronger than before.
 - ~~Scope Declaration~~ — **Done.** `ToolMeta.scopes` per tool; `execute_tool()` enforces `allowed_scopes`; `AgentRunRequest.allowed_scopes` threads through to every tool call.
 - ~~Memory Retrieval In Agent Loop~~ — **Done.** `search_memory` tool over artifact records/vector hits; `_preflight_memory()` auto-injects prior run context; `memory_context_used` and `memory_hits` surfaced in response.
 - ~~Structured Tool Error Envelopes~~ — **Done.** `ToolResult` dataclass: `ok`, `error_type`, `retryable`, `recovery_hint`; serialized into model messages for retry reasoning.
+- ~~Post-hoc Answer Verification~~ — **Done.** `_verify_answer()` in `agent_runner.py:204` runs after every `final_answer` stop; uses `generate_reasoning()` to check answer coherence against tool evidence; result surfaced as `verification` on `AgentResult` and `AgentRunResponse`.
 
 **Open gaps:**
 
@@ -185,7 +187,7 @@ Agentic workflow — stronger than before.
 ## Control Flow Assessment
 - Who chooses the next action: In `/agents/run`, the model chooses among exposed tools or final answer. In most other endpoints, ordinary code chooses the sequence and the model only synthesizes text/JSON.
 - Can the system continue across multiple steps without a new user request: Yes, within one background agent run until final answer, timeout, model error, or max iterations.
-- Can it observe outcomes and revise its plan: Yes. It observes tool outputs and can choose another tool call; the `update_plan` tool lets the model explicitly revise goal, steps, and blockers as first-class state persisted in `AgentResult.plan_state`.
+- Can it observe outcomes and revise its plan: Yes. It observes tool outputs and can choose another tool call; the `update_plan` tool lets the model explicitly revise goal, steps, and blockers as first-class state persisted in `AgentResult.plan_state`. After the loop, `_verify_answer()` runs an independent coherence check on the final answer against the tool evidence collected — the verdict is advisory but durable in the run record.
 - Can it write state that changes later behavior: Yes. Artifacts and vector records are persisted; `search_memory` preflight automatically retrieves that memory before the next run's first model call.
 - Are tool patterns mature enough to support reliable agency: Adequate for read-only repo scouting. They are not mature enough for high-risk mutation workflows because there are no transactional semantics, confirmation protocol, or compensation handlers.
 
@@ -200,7 +202,8 @@ This should not be pushed toward a broad mutation-capable autonomous agent yet. 
 1. ~~Add a `search_memory` tool~~ — **Done.** `search_memory` tool + `_preflight_memory()` auto-injection; `memory_context_used`/`memory_hits` in response.
 2. ~~Replace plain-string tool results with structured envelopes~~ — **Done.** `ToolResult`: `ok`, `error_type`, `retryable`, `data`, `recovery_hint`; all 7 executors updated.
 3. ~~Add tool scope metadata and enforce in `execute_tool()`~~ — **Done.** `ToolMeta.scopes` + `allowed_scopes` enforcement; `scope_denied` error type.
-4. Add confirmation or clarification behavior for ambiguous paths, broad searches, and uncertain matches.
-5. Version tool schemas before external MCP/editor clients depend on them heavily.
+4. ~~Add a post-hoc answer verifier to check final answer coherence against tool evidence~~ — **Done.** `_verify_answer()` in `agent_runner.py`; `verification` field on `AgentResult` and `AgentRunResponse`.
+5. Add confirmation or clarification behavior for ambiguous paths, broad searches, and uncertain matches.
+6. Version tool schemas before external MCP/editor clients depend on them heavily.
 
 The architecture becomes materially riskier if model-selected tools are allowed to write files, run shell commands, or mutate external systems before permission gates, confirmations, transactional boundaries, compensation behavior, and audit controls are implemented.
