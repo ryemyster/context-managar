@@ -126,6 +126,51 @@ async def embed(text: str) -> list[float] | None:
         return None
 
 
+async def chat_with_tools(
+    messages: list[dict],
+    tools: list[dict],
+    model: str | None = None,
+) -> dict:
+    """
+    Call Ollama /api/chat with tool definitions (uses reasoning model by default).
+
+    Returns the raw message dict from the response:
+    - message.tool_calls present  → model wants to call a tool
+    - message.tool_calls absent   → model has a final answer in message.content
+
+    Never raises — returns {"error": str} so agent_runner can detect and stop the loop.
+    """
+    use_model = model or config.OLLAMA_REASON_MODEL
+    log.debug("ollama chat_with_tools model=%s messages=%d tools=%d", use_model, len(messages), len(tools))
+    t0 = time.monotonic()
+    try:
+        r = await get_client().post(
+            "/api/chat",
+            json={
+                "model":    use_model,
+                "messages": messages,
+                "tools":    tools,
+                "stream":   False,
+                "options": {
+                    "temperature": 0.1,
+                    "num_ctx":     config.OLLAMA_NUM_CTX,
+                },
+            },
+            timeout=config.OLLAMA_REASON_TIMEOUT,
+        )
+        r.raise_for_status()
+        message = r.json().get("message", {})
+        log.debug("ollama chat_with_tools done dur=%.2fs has_tool_calls=%s",
+                  time.monotonic() - t0, bool(message.get("tool_calls")))
+        return message
+    except httpx.TimeoutException:
+        log.warning("ollama chat_with_tools timeout model=%s dur=%.2fs", use_model, time.monotonic() - t0)
+        return {"error": "timeout — model took too long, try fewer iterations or a simpler task"}
+    except Exception as e:
+        log.error("ollama chat_with_tools error: %s", e)
+        return {"error": str(e)}
+
+
 async def list_models() -> list[str]:
     """Return list of available model names. Empty list on failure."""
     try:

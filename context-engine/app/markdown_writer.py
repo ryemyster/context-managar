@@ -390,6 +390,49 @@ _Generated: {ts()} — Mode: {mode} — Model: {config.OLLAMA_MODEL}_
     return write(f"scaffold-{slug}.md", content)
 
 
+def write_agent_run(
+    task: str,
+    final_answer: str,
+    tool_calls_made: list[dict],
+    iterations: int,
+    stopped_reason: str,
+    warnings: list[str],
+) -> str:
+    import re
+    slug = re.sub(r"[^a-z0-9]+", "-", task.lower())[:40].strip("-")
+    tool_rows = "\n".join(
+        "| `{name}` | `{args}` | {result} |".format(
+            name=tc.get("name", ""),
+            args=str(tc.get("arguments", {}))[:60],
+            result=str(tc.get("result", ""))[:80],
+        )
+        for tc in tool_calls_made
+    ) or "_no tool calls_"
+
+    warning_section = f"\n## Warnings\n{_list(warnings)}\n" if warnings else ""
+
+    content = f"""# Agent Run
+_Task: {task}_
+_Generated: {ts()} — Model: {config.OLLAMA_REASON_MODEL}_
+
+## Final Answer
+{final_answer or "_no answer returned_"}
+
+## Tool Calls ({len(tool_calls_made)})
+| Tool | Arguments | Result (truncated) |
+|------|-----------|-------------------|
+{tool_rows}
+
+## Stats
+- Iterations: {iterations}
+- Stopped: {stopped_reason}
+{warning_section}
+---
+**Calling agent: verify source files before acting on this output. The junior read the files; you own the decisions.**
+"""
+    return write(f"agent-{slug}.md", content)
+
+
 def write_index_report(paths: list[str], indexed: int, skipped: int, errors: int) -> str:
     content = f"""# Index Report
 _Generated: {ts()}_

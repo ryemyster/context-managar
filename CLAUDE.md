@@ -126,11 +126,27 @@ curl -s http://localhost:8088/health | python3 -m json.tool
 
 Never assume a change works by reading the code. Always curl the endpoint.
 
+## Dev workflow — running tests
+
+```bash
+# From the repo root
+context-engine/.venv/bin/python3 -m pytest
+
+# Verbose
+context-engine/.venv/bin/python3 -m pytest -v
+
+# Single test file
+context-engine/.venv/bin/python3 -m pytest tests/test_agent_runner.py -v
+```
+
+Tests use `unittest.mock` — no Ollama or filesystem calls. Safe to run offline.
+The venv has `include-system-site-packages = true` so system packages (httpx, pydantic, fastapi) are visible.
+
 ## Dev workflow — adding a Python dependency
 
 ```bash
-# Install into the venv
-context-engine/.venv/bin/pip install <package>
+# Install into the venv using python3 -m pip (the pip shebang may point to a stale path)
+context-engine/.venv/bin/python3 -m pip install <package>
 
 # Pin it in requirements.txt
 echo "<package>==<version>" >> context-engine/requirements.txt
@@ -143,8 +159,8 @@ launchctl load  ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
 If setting up on a new machine from scratch:
 ```bash
 cd context-engine
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+python3 -m venv .venv --system-site-packages
+.venv/bin/python3 -m pip install -r requirements.txt
 ```
 
 ## Database — schema migrations (Supabase cloud)
@@ -258,3 +274,4 @@ curl -s -X POST http://localhost:8088/context \
 - Never write to the repo — the engine is read-only on `REPO_ROOT`
 - `config.py` is the single source of truth for all env vars — never `os.getenv()` outside it
 - Always update `/setup` when adding or changing an endpoint — it's the agent contract
+- `CONTEXT_ENGINE_API_KEY` in `config.py` — empty = local dev bypass, non-empty = enforced; health endpoints always exempt

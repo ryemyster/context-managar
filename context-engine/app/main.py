@@ -14,6 +14,7 @@ Hard rules enforced here:
 import asyncio
 import time
 import traceback
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
@@ -21,7 +22,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from . import config
 from . import ollama_client, supabase_vector
-from .logger import log
+from .logger import log, request_id_var
 
 
 @asynccontextmanager
@@ -41,10 +42,13 @@ from . import artifact_store
 from .models import (
     ScanRequest, FindRequest, DependenciesRequest, SummarizeRequest,
     ContextRequest, DiffRequest, VectorSearchRequest, IndexRequest, DraftRequest, ScaffoldRequest, IssueAuditRequest,
+    AgentRunRequest, AgentRunResponse,
+    ToolCallRequest,
     HealthResponse, ScanResponse, FindResponse, RoutesResponse,
     DependenciesResponse, SummarizeResponse, ContextResponse,
     DiffResponse, VectorSearchResponse, IndexResponse, DraftResponse, ScaffoldResponse, ScaffoldFileResult, IssueAuditResponse,
 )
+from . import agent_runner, tool_registry
 from .repo_reader import safe_resolve, read_file, rel_path, walk_repo, build_snippet_block
 from .search_worker import find_in_repo, extract_imports
 from .route_extractor import extract_routes
@@ -63,24 +67,56 @@ app = FastAPI(
 )
 
 
+_BYPASS_PATHS = {"/health", "/healthcheck", "/setup"}
+
+
+class _AuthMiddleware(BaseHTTPMiddleware):
+    """
+    API key enforcement. Enabled only when CONTEXT_ENGINE_API_KEY is set.
+    Skips auth for health/setup paths so monitoring works unauthenticated.
+    Local dev: leave the env var unset — all requests pass through.
+    Cloud: set CONTEXT_ENGINE_API_KEY to a strong secret.
+    """
+    async def dispatch(self, request: Request, call_next):
+        if config.CONTEXT_ENGINE_API_KEY:
+            if request.url.path not in _BYPASS_PATHS:
+                key = request.headers.get("X-API-Key", "")
+                if key != config.CONTEXT_ENGINE_API_KEY:
+                    log.warning("auth rejected path=%s", request.url.path)
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "X-API-Key required"},
+                        headers={"WWW-Authenticate": "ApiKey"},
+                    )
+        return await call_next(request)
+
+
 class _RequestLog(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        rid = request.headers.get("X-Request-Id") or uuid.uuid4().hex[:12]
+        token = request_id_var.set(rid)
         t0 = time.monotonic()
         try:
             response = await call_next(request)
         except Exception:
             dur = time.monotonic() - t0
-            log.error("%s %s unhandled %.3fs\n%s",
-                      request.method, request.url.path, dur, traceback.format_exc())
+            log.error("unhandled path=%s dur=%.3fs\n%s",
+                      request.url.path, dur, traceback.format_exc())
             return JSONResponse(status_code=500, content={"detail": "internal server error"})
+        finally:
+            request_id_var.reset(token)
         dur = time.monotonic() - t0
         ms  = dur * 1000
-        lvl = log.warning if (response.status_code >= 500 or ms > config.SLOW_REQUEST_MS) else log.info
-        lvl("%s %s %d %.0fms", request.method, request.url.path, response.status_code, ms)
+        slow = ms > config.SLOW_REQUEST_MS
+        lvl = log.warning if (response.status_code >= 500 or slow) else log.info
+        extra = " SLOW" if slow else ""
+        lvl("%s %s %d %.0fms%s rid=%s", request.method, request.url.path, response.status_code, ms, extra, rid)
+        response.headers["X-Request-Id"] = rid
         return response
 
 
 app.add_middleware(_RequestLog)
+app.add_middleware(_AuthMiddleware)
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────
@@ -328,6 +364,8 @@ async def setup():
         "## Decision rules\n\n"
         "| Situation | Call |\n"
         "|---|---|\n"
+        "| Delegate any agentic task to the junior | `POST /agents/run` → poll `GET /agents/run/status/{run_id}` |\n"
+        "| Discover what tools the junior has | `GET /agents/tools` |\n"
         "| Starting any non-trivial task | `POST /context` — always start here |\n"
         "| Need to know what's in a directory | `POST /scan` |\n"
         "| Need to find where a concept lives | `POST /find` |\n"
@@ -339,7 +377,7 @@ async def setup():
         "| One file to generate or edit — spec is clear | `POST /draft` — JR dev delegation |\n"
         "| Feature spans multiple files — want to preserve context window | `POST /scaffold` — multi-file delegation |\n"
         "| Auditing GitHub issues against repo evidence | `POST /agents/issue-auditor/run` → poll `GET /agents/issue-auditor/status/{run_id}` |\n"
-        "| Novel architecture, security, complex logic | Claude only — do not delegate |\n"
+        "| Novel architecture, security, complex logic | Calling agent only — do not delegate |\n"
         "| Engine unreachable | Proceed without it — never block on the scout |\n\n"
         f"**Skip when:** one-liner task, files already in context, or `{base}/healthcheck` returns non-200.\n\n"
         f"**Troubleshoot:** `GET {base}/debug` — model state, vector row count, config. No model calls.\n"
@@ -348,6 +386,30 @@ async def setup():
         "\n---\n\n"
 
         "## Endpoint reference\n\n"
+
+        "### POST /agents/run — delegate any task to the junior agent\n"
+        "The agent autonomously decides what to scan, grep, and read. It loops until it has enough evidence, "
+        "then returns a final answer with a complete tool-call trace. "
+        "**Returns immediately** with `run_id` and `status: \"running\"`. "
+        "Poll `GET /agents/run/status/{run_id}` until status is no longer `\"running\"`.\n\n"
+        "```json\n"
+        '{  "task": "Find all route handlers in ryemyster/context-manager/context-engine/app and list them with their HTTP methods",\n'
+        '   "tools": [],\n'
+        '   "max_iterations": 10  }\n'
+        "```\n"
+        "- `tools`: empty = all tools enabled. Restrict to `[\"scan_directory\", \"read_file\"]` to limit scope.\n"
+        "- `max_iterations`: default 10. Increase for complex multi-file tasks.\n"
+        "- `system_prompt`: optional — override the default system prompt.\n"
+        "Poll response fields: `final_answer` (the agent's conclusion), `tool_calls_made` (what it called and why), "
+        "`iterations`, `stopped_reason` (`final_answer` | `max_iterations` | `timeout` | `model_error`).\n\n"
+        "**Key proof of agentic behavior:** check `tool_calls_made` — non-empty means the agent actually explored "
+        "the repo autonomously, not just generated text.\n\n"
+
+        "### GET /agents/tools — tool manifest for agent discovery\n"
+        "Returns the JSON schemas for all tools the junior can call. "
+        "Any calling agent reads this to know exactly what the junior is capable of — no hardcoding required. "
+        "Schema format is OpenAI/Ollama/MCP-compatible.\n"
+        "Available tools: `scan_directory`, `find_in_code`, `read_file`, `grep`, `health_check`.\n\n"
 
         "### POST /context — use before every non-trivial task\n"
         "Model: code. Scans only requested paths, greps focus terms in scope, optionally runs vector search, "
@@ -485,6 +547,16 @@ async def setup():
         "\n---\n\n"
 
         "## Worked examples\n\n"
+        "**Agent delegation (/agents/run) — the primary pattern:**\n"
+        "```\n"
+        "Task: find all route handlers in this repo\n\n"
+        "1. GET /agents/tools          → understand what the junior can do\n"
+        "2. POST /agents/run           → {\"task\": \"...\", \"max_iterations\": 10}\n"
+        "   ← {run_id, status: 'running'}\n"
+        "3. GET /agents/run/status/{run_id}  → poll until status != 'running'\n"
+        "4. Read final_answer + verify tool_calls_made shows real exploration\n"
+        "5. Verify source files before acting on the answer\n"
+        "```\n\n"
         "**Single file delegation (/draft):**\n"
         "```\n"
         "Task: add a createdBy field to the checkin model\n\n"
@@ -1329,6 +1401,171 @@ Return the complete new file only. No explanation."""
 
     log.debug("POST /scaffold done files=%d errors=%d dur=%.2fs", len(results), len(errors), time.monotonic() - t0)
     return ScaffoldResponse(task=req.task, files=results, total=len(results), errors=errors)
+
+
+# ── Generic Agent Run ──────────────────────────────────────────────────────────
+
+@app.post("/tools/call")
+async def tools_call(req: ToolCallRequest):
+    """
+    Execute a single tool by name. Used by the MCP wrapper and any caller that
+    wants direct tool access without going through the full agent loop.
+
+    Available tools: scan_directory, find_in_code, read_file, grep, health_check
+    Returns: {"name": str, "result": str}
+    """
+    result = await tool_registry.execute_tool(req.name, req.arguments)
+    return {"name": req.name, "result": result}
+
+
+@app.get("/agents/tools")
+async def agents_tools():
+    """
+    Tool manifest — returns JSON schemas for all tools the agent can call.
+    Any calling agent (Claude, Codex, Qwen, etc.) hits this to discover capabilities.
+    Schema format is OpenAI/Ollama/MCP-compatible.
+    """
+    return {"tools": tool_registry.get_tool_definitions()}
+
+
+async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
+    """Background worker for POST /agents/run."""
+    try:
+        result = await agent_runner.run_agent(
+            task=req.task,
+            tools=req.tools or None,
+            system_prompt=req.system_prompt,
+            max_iterations=req.max_iterations,
+        )
+        written = mw.write_agent_run(
+            task=req.task,
+            final_answer=result.final_answer,
+            tool_calls_made=result.tool_calls_made,
+            iterations=result.iterations,
+            stopped_reason=result.stopped_reason,
+            warnings=[],
+        )
+        markdown_content = ""
+        try:
+            markdown_content = Path(written).read_text(encoding="utf-8")
+        except Exception:
+            pass
+
+        response_payload = {
+            "run_id":          run_id,
+            "status":          "complete" if result.stopped_reason == "final_answer" else result.stopped_reason,
+            "task":            req.task,
+            "final_answer":    result.final_answer,
+            "tool_calls_made": result.tool_calls_made,
+            "iterations":      result.iterations,
+            "stopped_reason":  result.stopped_reason,
+            "warnings":        [],
+        }
+        artifacts = artifact_store.write_record(
+            event_id=run_id,
+            tool="agents/run",
+            request=req.model_dump(),
+            response=response_payload,
+            markdown=markdown_content or None,
+            status=response_payload["status"],
+        )
+        response_payload["artifacts"] = artifacts
+
+        vector_warnings = await supabase_vector.store_artifact_record(artifacts["record"], source_type="agent_run")
+        if vector_warnings:
+            response_payload["warnings"] = vector_warnings
+            artifact_store.write_record(
+                event_id=run_id,
+                tool="agents/run",
+                request=req.model_dump(),
+                response=response_payload,
+                markdown=markdown_content or None,
+                status=response_payload["status"],
+            )
+
+        asyncio.create_task(supabase_vector.store_artifact(written))
+        log.debug("agent/run background done run_id=%s stopped=%s iter=%d tool_calls=%d",
+                  run_id, result.stopped_reason, result.iterations, len(result.tool_calls_made))
+    except Exception:
+        log.error("agent/run background error run_id=%s\n%s", run_id, traceback.format_exc())
+        artifact_store.write_record(
+            event_id=run_id,
+            tool="agents/run",
+            request=req.model_dump(),
+            response={"run_id": run_id, "status": "error", "task": req.task,
+                      "final_answer": "", "tool_calls_made": [], "iterations": 0,
+                      "stopped_reason": "error", "warnings": ["background task failed — check logs"]},
+            status="error",
+        )
+
+
+@app.post("/agents/run", response_model=AgentRunResponse)
+async def agents_run(req: AgentRunRequest, background_tasks: BackgroundTasks):
+    """
+    Delegate any task to the local junior agent.
+
+    The agent autonomously decides what files to read/scan/grep, loops until it has
+    enough evidence, and returns a final answer with a full tool-call trace.
+
+    Returns immediately with run_id and status "running".
+    Poll GET /agents/run/status/{run_id} until status is no longer "running".
+
+    Body:
+      task            — what to accomplish (required)
+      tools           — tool names to enable; empty = all tools
+      max_iterations  — default 10
+      system_prompt   — override the default system prompt
+
+    GET /agents/tools to see available tool definitions and schemas.
+    """
+    pending = artifact_store.write_pending_record(
+        tool="agents/run",
+        request=req.model_dump(),
+    )
+    run_id = pending["event_id"]
+    background_tasks.add_task(_run_agent_background, run_id, req)
+
+    log.debug("POST /agents/run queued run_id=%s task_len=%d", run_id, len(req.task))
+    return AgentRunResponse(
+        run_id=run_id,
+        status="running",
+        task=req.task,
+        artifacts=pending,
+    )
+
+
+@app.get("/agents/run/status/{run_id}")
+async def agents_run_status(run_id: str):
+    """
+    Poll the status of a queued agent run.
+
+    Same shape as POST /agents/run once complete.
+    Status values: "running" | "complete" | "final_answer" | "max_iterations" | "timeout" | "model_error" | "error"
+    """
+    import json as _json
+    if not all(c.isalnum() or c == "-" for c in run_id):
+        raise HTTPException(status_code=400, detail="invalid run_id format")
+    record_path = config.OUTPUT_DIR / "records" / f"{run_id}.json"
+    if not record_path.exists():
+        raise HTTPException(status_code=404, detail=f"run_id {run_id!r} not found")
+    record = _json.loads(record_path.read_text(encoding="utf-8"))
+    resp = dict(record.get("response") or {})
+    resp["run_id"]         = run_id
+    resp["status"]         = record.get("status", "unknown")
+    resp.setdefault("task",            "")
+    resp.setdefault("final_answer",    "")
+    resp.setdefault("tool_calls_made", [])
+    resp.setdefault("iterations",      0)
+    resp.setdefault("stopped_reason",  "")
+    resp.setdefault("warnings",        [])
+    markdown_path = config.OUTPUT_DIR / "markdown" / f"{run_id}.md"
+    resp["artifacts"] = {
+        "event_id":  run_id,
+        "record":    str(record_path),
+        "markdown":  str(markdown_path) if markdown_path.exists() else None,
+        "event_log": str(config.OUTPUT_DIR / "events.jsonl"),
+    }
+    return resp
 
 
 def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:

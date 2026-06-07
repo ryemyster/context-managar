@@ -1,245 +1,232 @@
 # Integrating context-engine with Claude Code
 
-**context-engine is the scout. Claude Code is the engineer.**
+**context-engine is the junior. You are the senior.**
 
-Use this document when setting up a new project that should use context-engine for pre-session context loading.
-
----
-
-## What context-engine does for you
-
-Before you give Claude a task, context-engine:
-1. Walks your repo (deterministic, zero model cost)
-2. Greps for focus terms
-3. Runs semantic vector search (nomic-embed-text → Supabase)
-4. Synthesizes into a compact context bundle (one qwen call)
-
-Result: `./ai-context/context-bundle.md` — a ~500-token scout report Claude reads instead of walking your repo itself (~5,000+ tokens).
+Call it via REST or MCP to delegate tasks. It autonomously scans, greps, and reads the repo, loops until it has evidence, and returns conclusions. You plan, review, and apply.
 
 ---
 
 ## Prerequisites
 
-- `context-engine` running: `curl http://localhost:8088/healthcheck` returns `{"ok":true,...}`
-- If not running: `cd ~/Repos/ryemyster/local-model && bash scripts/start-context.sh`
+- context-engine running: `curl http://localhost:8088/healthcheck` → `{"ok":true,...}`
+- If not: `launchctl load ~/Library/LaunchAgents/life.ascendvent.context-manager.plist`
 
 ---
 
 ## Self-configuration (fastest path)
 
-In any new Claude Code session, just say:
+In any new Claude Code session:
 
 ```
 Run: `curl -s http://localhost:8088/setup` and use it to configure this project to use context-engine
 ```
 
-Claude reads the live Markdown — with current status already filled in — and handles everything:
-writes the CLAUDE.md block, creates the slash command, tells you whether to run `/index`.
+Claude reads the live Markdown and handles everything: writes the `.claude/rules/context-engine.md` rule, tells you whether to run `/index`, configures the path prefix for your repo.
 
 ---
 
-## Per-project setup (manual)
+## Primary workflow — agent delegation
 
-### 1. Point context-engine at your repo
+The engine runs an autonomous agentic loop. Delegate a task; poll for the result.
 
-In `.env` at the repo root:
-```
-REPO_PATH=/path/to/your/project
-```
-
-Then restart (no rebuild needed — it's plain Python):
 ```bash
-launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
-launchctl load  ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+# 1. Delegate
+curl -s -X POST http://localhost:8088/agents/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task": "Find all FastAPI route handlers in ryemyster/context-manager/context-engine/app and list them with their HTTP methods and paths"
+  }' | python3 -m json.tool
+# → {"run_id": "abc123...", "status": "running", "task": "..."}
+
+# 2. Poll until complete
+curl -s http://localhost:8088/agents/run/status/abc123... | python3 -m json.tool
+# → {"status": "complete", "final_answer": "...", "tool_calls_made": [...], "iterations": 3}
 ```
 
-Verify:
+**Verify it was agentic:** check `tool_calls_made` — it should show real scan/find/read calls. An empty list means the model answered from training data, not evidence.
+
+### What the agent can do
+
 ```bash
-curl http://localhost:8088/healthcheck
-# {"ok":true,"model":"qwen2.5-coder:3b","repo":"/path/to/your/project"}
+curl -s http://localhost:8088/agents/tools | python3 -m json.tool
 ```
 
-### 2. Add CLAUDE.md to your project
+| Tool | When the agent calls it |
+|------|------------------------|
+| `scan_directory` | First — to discover what files exist |
+| `find_in_code` | To locate where a function or concept lives |
+| `read_file` | To inspect a specific file (supports offset/limit paging) |
+| `grep` | Precise regex matching across files |
+| `health_check` | To verify the engine is operational at session start |
 
-Copy the rule below into your project's `CLAUDE.md` or `.claude/rules/context-engine.md`:
+### Request parameters
+
+```json
+{
+  "task": "your task description",
+  "tools": [],              // optional — empty = all tools enabled
+  "max_iterations": 10,     // optional — stop after N think→act cycles
+  "system_prompt": null     // optional — override the default agent instructions
+}
+```
+
+---
+
+## Direct endpoint workflow
+
+For mechanical tasks where you already know what to call:
+
+```bash
+# Full context bundle for a task (the classic pre-session workflow)
+curl -s -X POST http://localhost:8088/context \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task": "Add rate limiting to the agents endpoint",
+    "paths": ["ryemyster/context-manager/context-engine/app"],
+    "focus": ["rate limit", "middleware", "agents"]
+  }' | python3 -m json.tool
+
+# Scan a directory
+curl -s -X POST http://localhost:8088/scan \
+  -H "Content-Type: application/json" \
+  -d '{"path": "ryemyster/context-manager/context-engine/app"}' | python3 -m json.tool
+
+# Find where a concept lives
+curl -s -X POST http://localhost:8088/find \
+  -H "Content-Type: application/json" \
+  -d '{"query": "safe_resolve path guard", "path": "ryemyster/context-manager/context-engine/app"}' \
+  | python3 -m json.tool
+
+# Summarize a file
+curl -s -X POST http://localhost:8088/summarize \
+  -H "Content-Type: application/json" \
+  -d '{"file": "ryemyster/context-manager/context-engine/app/agent_runner.py"}' \
+  | python3 -m json.tool
+```
+
+Scripts are available in `scripts/` for each endpoint.
+
+---
+
+## Configuring a new project manually
+
+### 1. Add the context-engine rule
+
+Create `.claude/rules/context-engine.md` in your project:
 
 ```markdown
-## Context Engine
+## Context Engine — when and how to use it
 
-A local context-engine runs at http://localhost:8088.
-Before starting any non-trivial task, run:
+A local context scout runs at http://localhost:8088. Claude is the SR dev; the scout is the JR dev.
 
-  bash ~/Repos/ryemyster/local-model/scripts/context.sh "your task description" "src/app,src/lib" "key,terms"
+**Availability check — always first:**
+curl -s http://localhost:8088/healthcheck
 
-Then read ./ai-context/context-bundle.md before planning or editing.
+**Path prefix for this repo:** owner/repo  (replace with your owner/repo)
 
-Scripts available:
-  context.sh      — full context bundle (primary workflow)
-  scan.sh         — scan a directory
-  find.sh         — grep + synthesize
-  routes.sh       — extract Next.js routes
-  dependencies.sh — map imports
-  summarize.sh    — summarize a single file
-  diff-summary.sh — review a git diff (pipe: git diff | diff-summary.sh)
-  vector-search.sh — semantic search (requires indexed data)
-  index.sh        — index repo into vector store (run before session)
+**Decision table:**
 
-Health:  curl http://localhost:8088/healthcheck
-Debug:   curl http://localhost:8088/debug
-Setup:   curl http://localhost:8088/setup
-Docs:    http://localhost:8088/docs
+| Situation | Endpoint | Body |
+|-----------|----------|------|
+| Starting any non-trivial task | POST /context | {"task": "...", "paths": ["owner/repo/src"]} |
+| Delegate agentic task to the junior | POST /agents/run → poll /agents/run/status/{run_id} | |
+| Need to know what is in a directory | POST /scan | {"path": "owner/repo/src"} |
+| Need to find where a concept lives | POST /find | {"query": "...", "path": "owner/repo/src"} |
+| Need to understand one specific file | POST /summarize | {"file": "owner/repo/path/to/file"} |
+| After editing — before returning | POST /diff-summary | {"diff": "<git diff output>"} |
 ```
 
-### 3. Add the /context slash command (optional)
-
-Create `.claude/commands/context.md` in your project:
-
-```markdown
-Run the context-engine scout before implementing the task.
-
-1. Run: bash ~/Repos/ryemyster/local-model/scripts/context.sh "$ARGUMENTS" "src/app,src/lib" ""
-2. Read: ./ai-context/context-bundle.md
-3. Report what was found (files, risks, vector hits), then ask what to implement.
-```
-
-Then type `/context add stripe enforcement to checkins` in Claude Code and it auto-runs.
-
-### 4. Index your repo before each session
+### 2. Index before each session (optional but recommended)
 
 ```bash
-bash ~/Repos/ryemyster/local-model/scripts/index.sh "src/app,src/lib,supabase"
+curl -s -X POST http://localhost:8088/index \
+  -H "Content-Type: application/json" \
+  -d '{"paths": ["owner/repo/src", "owner/repo/lib"]}'
 ```
 
-Stores nomic-embed-text embeddings in Supabase so `/vector-search` and `/context` return
-semantically relevant results. Re-run when the codebase changes significantly.
+Stores embeddings in Supabase. Re-run when the codebase changes significantly. Enables semantic `/vector-search` in `/context` calls.
 
 ---
 
-## The daily workflow
+## Daily workflow (with agent delegation)
 
 ```
-1. Open a new Claude Code session
+1. Open Claude Code session
 
-2. Index if code changed since last session:
-   bash ~/Repos/ryemyster/local-model/scripts/index.sh "src/app,src/lib"
+2. Optional — index if code changed since last session:
+   POST /index {"paths": ["owner/repo/src"]}
 
-3. Before giving Claude a task:
-   bash ~/Repos/ryemyster/local-model/scripts/context.sh \
-     "Add plan enforcement to check-in generation" \
-     "src/app,src/lib,supabase" \
-     "auth,stripe,checkins"
+3. For complex investigation tasks — delegate to the junior:
+   POST /agents/run {"task": "Find all auth middleware and check if it covers /agents/*"}
+   GET  /agents/run/status/{run_id}   ← poll until complete
+   → Junior returns: final_answer + tool_calls_made (evidence trail)
 
-4. Tell Claude:
-   "Read ./ai-context/context-bundle.md then implement:
-    Add plan enforcement to check-in generation"
+4. For pre-task context loading — direct call:
+   POST /context {"task": "Add auth to agent endpoints", "paths": [...], "focus": [...]}
+   → Read the context bundle artifact
 
-5. Claude reads the pre-digested scout report (~500 tokens), verifies source files, implements.
+5. Claude reviews findings, makes judgment calls, implements
 
-6. After Claude edits, review the diff:
-   git diff | bash ~/Repos/ryemyster/local-model/scripts/diff-summary.sh
+6. After Claude edits — review the diff:
+   git diff | POST /diff-summary {"diff": "..."}
 
-7. Claude reviews diff summary + signs off.
+7. Claude reviews risk-annotated diff summary + signs off
 ```
 
 ---
 
-## Switching between projects
+## Authenticated requests (cloud deployment)
 
-You can only point context-engine at **one repo at a time**. To switch:
+If the engine is deployed with `CONTEXT_ENGINE_API_KEY` set:
 
 ```bash
-# Edit REPO_PATH in .env
-sed -i '' 's|^REPO_PATH=.*|REPO_PATH=/path/to/other-project|' .env
-
-# Restart (no rebuild needed)
-launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
-launchctl load  ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
-
-# Verify the new repo is mounted
-curl http://localhost:8088/healthcheck
+curl -H "X-API-Key: your-secret" -H "Content-Type: application/json" \
+  http://context-engine.your-domain.com/agents/run \
+  -d '{"task": "..."}'
 ```
+
+Health endpoints (`/health`, `/healthcheck`, `/setup`) are always exempt — no key needed for monitoring.
 
 ---
 
-## Monitoring endpoints
+## Monitoring endpoints quick reference
 
-| Endpoint | Use case | Returns |
-|---|---|---|
-| `GET /healthcheck` | Health checks, monitors, scripts | HTTP 200 `{"ok":true}` or HTTP 503 `{"ok":false,"reason":"..."}` |
-| `GET /health` | Full status check | JSON with all service states, always HTTP 200 |
-| `GET /debug` | Troubleshooting | Model loaded, vector row count, all output files, config, tips |
-| `GET /setup` | Configure a new project | Live Markdown Claude can read and act on |
-
-### /healthcheck — for automation
-Returns 200 only when Ollama is reachable, both models are available, and the repo is mounted.
-Use this in scripts, CI, or health monitors.
+| Endpoint | Use case |
+|----------|----------|
+| `GET /healthcheck` | Pass/fail: HTTP 200 or 503. Use in scripts and health monitors. |
+| `GET /health` | Full service status: Ollama, Supabase, models, repo. Always HTTP 200. |
+| `GET /debug` | Troubleshooting: model loaded, vector row count, output files, config, tips. |
+| `GET /setup` | Self-configure: any agent reads this cold to understand the full API. |
 
 ```bash
+# Quick up check
 curl -sf http://localhost:8088/healthcheck && echo "up" || echo "DOWN"
+
+# Full status
+curl -s http://localhost:8088/health | python3 -m json.tool
+
+# Troubleshoot — check 'tips' field first
+curl -s http://localhost:8088/debug | python3 -m json.tool
 ```
-
-### /debug — when something feels wrong
-Shows exactly what's loaded, how many vector rows exist, and what output files are in `ai-context/`:
-
-```bash
-curl http://localhost:8088/debug | python3 -m json.tool
-```
-
-Key fields to check:
-- `ollama_loaded` — which model is currently in memory (null = no model loaded yet)
-- `vector_row_count` — how many chunks are indexed; 0 means `/index` hasn't been run
-- `config.supabase_key_set` — false means `.env` still has the placeholder key
-- `tips` — common failure patterns with specific fixes
-
-### /setup — self-configure any project
-Returns live Markdown. Claude can fetch and act on it directly:
-
-```
-Run: `curl -s http://localhost:8088/setup` and use it to configure this project
-```
-
----
-
-## Memory expectations (M3 Air 8GB)
-
-| Operation | RAM used | Duration |
-|---|---|---|
-| Idle (no model loaded) | ~3.3 GB | — |
-| `/scan`, `/find`, `/summarize` | ~5.1 GB | 30-90s |
-| `/index`, `/vector-search` | ~3.6 GB | 2-10s per chunk |
-| `/context` (both models) | ~5.4 GB peak | 60-150s |
-
-One model at a time. Don't run concurrent requests. Don't pull 7b models.
 
 ---
 
 ## Troubleshooting
 
-**Start here: `curl http://localhost:8088/debug | python3 -m json.tool`**
+**Empty or generic `final_answer` from `/agents/run`:**
+- Check `tool_calls_made` — zero calls means the model answered without evidence
+- Increase `max_iterations` or make the task more specific
+- Try `GET /agents/tools` to verify all 5 tools are registered
 
-The `tips` field in `/debug` maps each failure to its fix. Below is the quick reference.
+**`/healthcheck` returns 503:**
+- Check `reason` in response body
+- `model not available` → `curl http://localhost:11434/api/tags` — start Ollama if down
+- `repo not mounted` → verify `REPO_ROOT` in the plist points to an existing directory
 
-**Empty vector search results**
-- Check `vector_row_count` in `/debug` — if 0, run `/index` first
-- After running qwen endpoints, nomic needs up to 30s to swap in — built-in 90s timeout handles it
-- Check `vector_ready: true` in `/health`
+**Slow responses / SLOW in logs:**
+- Scope the path: `"paths": ["owner/repo/src/api"]` not `"paths": ["owner/repo"]`
+- First call after restart has model cold-load overhead (~30s) — retry once
 
-**Model timeout on /scan or /context**
-- Scope your path: `context.sh "task" "src/app/api"` not the full repo root
-- Retry once — model may have been cold-loading (~30s on first call)
-
-**`/healthcheck` returns 503**
-- Check `reason` field in the response body
-- `model not available` → Ollama is down: `ollama list` to check, `ollama serve` to start
-- `repo not mounted` → `REPO_PATH` in `.env` doesn't exist
-
-**Wrong repo being scanned**
-- Check `repo_root` in `/health` or `/debug`
-- Update `REPO_PATH` in `.env` → restart with launchctl unload/load
-
-**`supabase_key_set: false` in /debug**
-- `.env` still has placeholder key — get real key from Supabase Studio → Settings → API → `service_role`
-
-**Port 8088 taken**
-- `lsof -i :8088` — find and stop the conflicting process first
-- Then restart: launchctl unload/load the plist
+**Path rejected errors in tool results:**
+- Paths must use `owner/repo/subdir` format — never bare `.` or `/`
+- Example: `ryemyster/context-manager/context-engine/app` not `app` or `.`

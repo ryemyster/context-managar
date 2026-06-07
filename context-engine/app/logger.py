@@ -2,7 +2,11 @@ import json
 import logging
 import sys
 import time
+from contextvars import ContextVar
 from . import config
+
+# Per-request ID injected by middleware; empty string when no active request
+request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 
 
 class _JsonFormatter(logging.Formatter):
@@ -12,8 +16,12 @@ class _JsonFormatter(logging.Formatter):
         entry: dict = {
             "ts":     self.formatTime(record, "%Y-%m-%dT%H:%M:%SZ"),
             "level":  record.levelname,
+            "logger": record.name,
             "msg":    record.getMessage(),
         }
+        rid = request_id_var.get("")
+        if rid:
+            entry["request_id"] = rid
         if record.exc_info:
             entry["exc"] = self.formatException(record.exc_info)
         return json.dumps(entry)

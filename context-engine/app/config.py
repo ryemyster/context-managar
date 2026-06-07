@@ -19,6 +19,11 @@ OLLAMA_NUM_CTX        = 4096    # 3b at 4096 ctx = ~2.4GB total — fine on 16GB
 OLLAMA_NUM_PREDICT    = 400     # max output tokens for code model
 OLLAMA_REASON_PREDICT = 1024    # reasoning model needs room for chain-of-thought
 
+# Agentic loop settings
+OLLAMA_AGENT_TIMEOUT        = float(os.getenv("OLLAMA_AGENT_TIMEOUT",        "600.0"))  # 10 min total wall-clock budget per agent run
+AGENT_MAX_ITERATIONS        = int(os.getenv("AGENT_MAX_ITERATIONS",          "10"))     # max think→act cycles before forced stop
+AGENT_TOOL_RESULT_MAX_CHARS = int(os.getenv("AGENT_TOOL_RESULT_MAX_CHARS",   "800"))    # truncate tool results to protect context window
+
 # ── Paths ──────────────────────────────────────────────────────────────────────
 REPO_ROOT  = Path(os.getenv("REPO_ROOT",   "/repo")).resolve()
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR",  "/output")).resolve()
@@ -41,6 +46,12 @@ SUPABASE_MATCH_FUNCTION   = os.getenv("SUPABASE_MATCH_FUNCTION",   "match_code_e
 
 # Embedding dimensions for nomic-embed-text
 EMBED_DIMENSIONS = 768
+
+# ── Security ───────────────────────────────────────────────────────────────────
+# Set CONTEXT_ENGINE_API_KEY to a non-empty string to require X-API-Key on every request.
+# Leave empty (default) to allow unauthenticated local access.
+# Cloud deployments MUST set this. Local dev can leave it unset.
+CONTEXT_ENGINE_API_KEY = os.getenv("CONTEXT_ENGINE_API_KEY", "")
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 LOG_LEVEL  = os.getenv("LOG_LEVEL",  "INFO").upper()

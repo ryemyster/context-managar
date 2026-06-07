@@ -189,3 +189,25 @@ class ScaffoldResponse(BaseModel):
     files: list[ScaffoldFileResult]
     total: int
     errors: list[str]
+
+
+class ToolCallRequest(BaseModel):
+    name: str
+    arguments: dict = {}
+
+class AgentRunRequest(BaseModel):
+    task: str
+    tools: list[str] = []           # empty = all tools enabled
+    max_iterations: int = 10
+    system_prompt: Optional[str] = None
+
+class AgentRunResponse(BaseModel):
+    run_id: str
+    status: str                      # "running" | "complete" | "error"
+    task: str
+    final_answer: str = ""
+    tool_calls_made: list[dict] = []
+    iterations: int = 0
+    stopped_reason: str = ""
+    warnings: list[str] = []
+    artifacts: dict = {}
