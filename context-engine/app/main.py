@@ -1411,21 +1411,31 @@ async def tools_call(req: ToolCallRequest):
     Execute a single tool by name. Used by the MCP wrapper and any caller that
     wants direct tool access without going through the full agent loop.
 
-    Available tools: scan_directory, find_in_code, read_file, grep, health_check, search_memory
-    Returns: {"name": str, "result": str}
+    Available tools: scan_directory, find_in_code, read_file, grep, health_check, search_memory, update_plan
+    Returns: {"name": str, "result": str, "ok": bool, "error_type": str | null}
     """
     result = await tool_registry.execute_tool(req.name, req.arguments)
-    return {"name": req.name, "result": result}
+    return {"name": req.name, "result": result.data, "ok": result.ok, "error_type": result.error_type}
 
 
 @app.get("/agents/tools")
 async def agents_tools():
     """
-    Tool manifest — returns JSON schemas for all tools the agent can call.
+    Tool manifest — returns JSON schemas and metadata for all tools the agent can call.
     Any calling agent (Claude, Codex, Qwen, etc.) hits this to discover capabilities.
     Schema format is OpenAI/Ollama/MCP-compatible.
+    Each entry includes 'scopes' and 'side_effects' from ToolMeta.
     """
-    return {"tools": tool_registry.get_tool_definitions()}
+    tools = []
+    for schema in tool_registry.get_tool_definitions():
+        name = schema["function"]["name"]
+        meta = tool_registry.get_tool_metadata(name)
+        tools.append({
+            **schema,
+            "scopes":       meta.scopes if meta else [],
+            "side_effects": meta.side_effects if meta else False,
+        })
+    return {"tools": tools}
 
 
 async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
@@ -1436,6 +1446,7 @@ async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
             tools=req.tools or None,
             system_prompt=req.system_prompt,
             max_iterations=req.max_iterations,
+            allowed_scopes=req.allowed_scopes,
         )
         written = mw.write_agent_run(
             task=req.task,
@@ -1452,14 +1463,17 @@ async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
             pass
 
         response_payload = {
-            "run_id":          run_id,
-            "status":          "complete" if result.stopped_reason == "final_answer" else result.stopped_reason,
-            "task":            req.task,
-            "final_answer":    result.final_answer,
-            "tool_calls_made": result.tool_calls_made,
-            "iterations":      result.iterations,
-            "stopped_reason":  result.stopped_reason,
-            "warnings":        [],
+            "run_id":               run_id,
+            "status":               "complete" if result.stopped_reason == "final_answer" else result.stopped_reason,
+            "task":                 req.task,
+            "final_answer":         result.final_answer,
+            "tool_calls_made":      result.tool_calls_made,
+            "iterations":           result.iterations,
+            "stopped_reason":       result.stopped_reason,
+            "warnings":             [],
+            "memory_context_used":  result.memory_context_used,
+            "memory_hits":          result.memory_hits,
+            "plan_state":           result.plan_state,
         }
         artifacts = artifact_store.write_record(
             event_id=run_id,

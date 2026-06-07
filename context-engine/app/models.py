@@ -200,6 +200,7 @@ class AgentRunRequest(BaseModel):
     tools: list[str] = []           # empty = all tools enabled
     max_iterations: int = 10
     system_prompt: Optional[str] = None
+    allowed_scopes: Optional[list[str]] = None   # None = all scopes permitted
 
 class AgentRunResponse(BaseModel):
     run_id: str
@@ -213,3 +214,4 @@ class AgentRunResponse(BaseModel):
     artifacts: dict = {}
     memory_context_used: bool = False
     memory_hits: int = 0
+    plan_state: dict = {}

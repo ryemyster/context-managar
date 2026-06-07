@@ -20,8 +20,10 @@ from .logger import log
 _DEFAULT_SYSTEM_PROMPT = (
     "You are a code analysis agent with tools to explore a software repository. "
     "Use tools to gather real evidence before drawing conclusions — do not guess. "
-    "Recommended call order: search_memory (check prior runs first) → scan_directory → find_in_code or grep → read_file. "
+    "Recommended call order: search_memory (check prior runs first) → update_plan (record your plan) "
+    "→ scan_directory → find_in_code or grep → read_file. "
     "Always call search_memory first — if a similar task was run before, use those results as a starting point. "
+    "After search_memory, call update_plan to record your goal and steps before exploring. "
     "When you have enough evidence, provide a final answer without calling more tools. "
     f"Repository root: {config.REPO_ROOT}"
 )
@@ -37,6 +39,7 @@ class AgentResult:
     message_history: list[dict] = field(default_factory=list)
     memory_context_used: bool = False
     memory_hits: int = 0
+    plan_state: dict = field(default_factory=dict)
 
 
 def _coerce_arguments(raw) -> dict:
@@ -52,12 +55,23 @@ def _coerce_arguments(raw) -> dict:
     return {}
 
 
+def _serialize_tool_result(result: tool_registry.ToolResult) -> str:
+    """Convert a ToolResult into the string that goes into the model's message history."""
+    if result.ok:
+        return result.data
+    parts = [f"[{result.error_type}, retryable={result.retryable}] {result.data}"]
+    if result.recovery_hint:
+        parts.append(f"— {result.recovery_hint}")
+    return " ".join(parts)
+
+
 async def run_agent(
     task: str,
     tools: list[str] | None = None,
     system_prompt: str | None = None,
     max_iterations: int | None = None,
     model: str | None = None,
+    allowed_scopes: list[str] | None = None,
 ) -> AgentResult:
     """
     Run the agentic loop for a task.
@@ -71,11 +85,12 @@ async def run_agent(
         system_prompt:  Override the default system prompt.
         max_iterations: Max think→act cycles (default: AGENT_MAX_ITERATIONS).
         model:          Ollama model name override (default: OLLAMA_REASON_MODEL).
+        allowed_scopes: Scope whitelist enforced on every tool call (None = all scopes).
 
-    Returns AgentResult with final_answer, iteration count, and full tool call trace.
+    Returns AgentResult with final_answer, iteration count, full tool call trace, and plan_state.
     """
-    max_iter = max_iterations if max_iterations is not None else config.AGENT_MAX_ITERATIONS
-    budget   = config.OLLAMA_AGENT_TIMEOUT
+    max_iter  = max_iterations if max_iterations is not None else config.AGENT_MAX_ITERATIONS
+    budget    = config.OLLAMA_AGENT_TIMEOUT
     tool_defs = tool_registry.get_tool_definitions(tools)
     system    = system_prompt or _DEFAULT_SYSTEM_PROMPT
 
@@ -90,12 +105,13 @@ async def run_agent(
     memory_hits = 0
     _search_memory_allowed = tools is None or "search_memory" in tools
     if _search_memory_allowed:
-        memory_ctx = await _preflight_memory(task)
+        memory_ctx = await _preflight_memory(task, allowed_scopes=allowed_scopes)
         if memory_ctx:
-            memory_hits = memory_ctx.count("---") + 1  # separator count → hit count
+            memory_hits = memory_ctx.count("---") + 1
             messages[1]["content"] = task + "\n\n" + memory_ctx
 
     tool_calls_made: list[dict] = []
+    plan_state: dict = {}
     t_start = time.monotonic()
     final_answer  = ""
     stopped_reason = "max_iterations"
@@ -142,13 +158,22 @@ async def run_agent(
             arguments = _coerce_arguments(fn.get("arguments", {}))
             log.debug("agent_runner tool name=%s args_keys=%s", name, list(arguments.keys()))
 
-            result = await tool_registry.execute_tool(name, arguments)
+            result = await tool_registry.execute_tool(name, arguments, allowed_scopes=allowed_scopes)
+
+            # Capture plan state whenever the model calls update_plan
+            if name == "update_plan" and result.ok:
+                try:
+                    plan_state = json.loads(result.data)
+                except Exception:
+                    pass
+
+            serialized = _serialize_tool_result(result)
             tool_calls_made.append({
                 "name":      name,
                 "arguments": arguments,
-                "result":    result[:300],   # truncate trace entry; full result is in messages
+                "result":    serialized[:300],   # truncate trace entry; full result is in messages
             })
-            messages.append({"role": "tool", "content": result})
+            messages.append({"role": "tool", "content": serialized})
 
     else:
         # for-loop exhausted without break → max_iterations hit
@@ -165,6 +190,7 @@ async def run_agent(
         message_history=messages,
         memory_context_used=bool(memory_ctx),
         memory_hits=memory_hits,
+        plan_state=plan_state,
     )
 
 
@@ -175,13 +201,15 @@ def _last_assistant_content(messages: list[dict]) -> str:
     return ""
 
 
-async def _preflight_memory(task: str) -> str:
+async def _preflight_memory(task: str, allowed_scopes: list[str] | None = None) -> str:
     """Query prior memory for the task and return formatted context, or empty string if none."""
     try:
-        result = await tool_registry.execute_tool("search_memory", {"query": task, "limit": 3})
-        if result.startswith("[no memory") or result.startswith("[error"):
+        result = await tool_registry.execute_tool(
+            "search_memory", {"query": task, "limit": 3}, allowed_scopes=allowed_scopes
+        )
+        if not result.ok or not result.data.strip() or result.data.startswith("[no memory"):
             return ""
-        return f"[Prior memory — relevant results from past runs]\n{result}"
+        return f"[Prior memory — relevant results from past runs]\n{result.data}"
     except Exception as exc:
         log.debug("agent_runner preflight_memory failed: %s", exc)
         return ""

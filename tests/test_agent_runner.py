@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'context-engine
 
 from unittest.mock import AsyncMock, patch, MagicMock
 from app.agent_runner import AgentResult, _coerce_arguments, run_agent
+from app.tool_registry import ToolResult
 
 
 # ── _coerce_arguments ──────────────────────────────────────────────────────────
@@ -27,12 +28,10 @@ class TestCoerceArguments:
         assert _coerce_arguments(raw) == {"path": "owner/repo/app"}
 
     def test_double_encoded_json_string(self):
-        # Ollama sometimes double-encodes: the string itself is JSON
         import json
         inner = json.dumps({"key": "val"})
         outer = json.dumps(inner)
-        # outer is a JSON-encoded JSON string — parse once → inner string, parse again → dict
-        parsed_outer = json.loads(outer)  # → inner (a string)
+        parsed_outer = json.loads(outer)
         assert _coerce_arguments(parsed_outer) == {"key": "val"}
 
     def test_invalid_json_string_returns_empty(self):
@@ -82,7 +81,7 @@ async def test_run_agent_calls_tool_and_continues():
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
          patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""):
         mock_chat.side_effect = [tool_call_msg, final_msg]
-        mock_exec.return_value = "health: ok (HTTP 200)"
+        mock_exec.return_value = ToolResult(ok=True, data="health: ok (HTTP 200)")
 
         result = await run_agent("Check health", max_iterations=5)
 
@@ -90,7 +89,7 @@ async def test_run_agent_calls_tool_and_continues():
     assert result.iterations == 2
     assert len(result.tool_calls_made) == 1
     assert result.tool_calls_made[0]["name"] == "health_check"
-    mock_exec.assert_called_once_with("health_check", {})
+    mock_exec.assert_called_once_with("health_check", {}, allowed_scopes=None)
     assert result.memory_context_used is False
     assert result.memory_hits == 0
 
@@ -155,7 +154,7 @@ async def test_run_agent_stops_at_max_iterations():
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec:
         mock_chat.return_value = tool_call_msg
-        mock_exec.return_value = "health: ok"
+        mock_exec.return_value = ToolResult(ok=True, data="health: ok")
 
         result = await run_agent("Any task", max_iterations=3)
 
@@ -174,24 +173,22 @@ async def test_run_agent_timeout():
         "tool_calls": [{"function": {"name": "health_check", "arguments": {}}}],
     }
 
-    # Patch time.monotonic to simulate budget exceeded after first call
     call_count = 0
     base_time = 1000.0
 
     def fake_monotonic():
         nonlocal call_count
         call_count += 1
-        # First two calls return start time, third simulates past budget
         if call_count <= 2:
             return base_time
-        return base_time + 700.0  # exceeds default 600s budget
+        return base_time + 700.0
 
     with patch("app.agent_runner.time.monotonic", side_effect=fake_monotonic), \
          patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec:
         mock_chat.return_value = tool_call_msg
-        mock_exec.return_value = "health: ok"
+        mock_exec.return_value = ToolResult(ok=True, data="health: ok")
 
         result = await run_agent("Any task", max_iterations=10)
 
@@ -215,11 +212,10 @@ async def test_run_agent_coerces_string_arguments():
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec:
         mock_chat.side_effect = [tool_call_msg, final_msg]
-        mock_exec.return_value = '{"files": [], "count": 0}'
+        mock_exec.return_value = ToolResult(ok=True, data='{"files": [], "count": 0}')
 
         result = await run_agent("Scan", max_iterations=5)
 
-    # Arguments should have been coerced from string to dict
     called_args = mock_exec.call_args[0][1]
     assert isinstance(called_args, dict)
     assert called_args == {"path": "owner/repo/app"}
@@ -255,8 +251,92 @@ async def test_run_agent_message_history_in_result():
 
         result = await run_agent("Task", max_iterations=1)
 
-    # system + user + assistant
     assert len(result.message_history) == 3
     assert result.message_history[0]["role"] == "system"
     assert result.message_history[1]["role"] == "user"
     assert result.message_history[2]["role"] == "assistant"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_plan_state_captured_from_update_plan():
+    """When the model calls update_plan, plan_state is captured on AgentResult."""
+    import json
+
+    update_plan_msg = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [{"function": {
+            "name": "update_plan",
+            "arguments": {
+                "goal": "Find all route handlers",
+                "steps": ["search_memory", "scan_directory", "read_file"],
+            },
+        }}],
+    }
+    final_msg = {"role": "assistant", "content": "Done.", "tool_calls": []}
+
+    plan_data = json.dumps({
+        "goal": "Find all route handlers",
+        "steps": ["search_memory", "scan_directory", "read_file"],
+        "current_step": 0,
+        "blockers": [],
+    })
+
+    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
+         patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""):
+        mock_chat.side_effect = [update_plan_msg, final_msg]
+        mock_exec.return_value = ToolResult(ok=True, data=plan_data)
+
+        result = await run_agent("Find all route handlers", max_iterations=5)
+
+    assert result.plan_state.get("goal") == "Find all route handlers"
+    assert result.plan_state.get("steps") == ["search_memory", "scan_directory", "read_file"]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_plan_state_empty_when_update_plan_not_called():
+    """plan_state is empty dict when the model never calls update_plan."""
+    final_msg = {"role": "assistant", "content": "Done.", "tool_calls": []}
+
+    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""):
+        mock_chat.return_value = final_msg
+        result = await run_agent("Quick task", max_iterations=1)
+
+    assert result.plan_state == {}
+
+
+@pytest.mark.asyncio
+async def test_run_agent_scope_denied_serialized_to_model():
+    """When a tool is scope-denied, the error string is fed back to the model."""
+    tool_call_msg = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [{"function": {"name": "read_file", "arguments": {"file": "owner/repo/f.py"}}}],
+    }
+    final_msg = {"role": "assistant", "content": "Cannot read files.", "tool_calls": []}
+
+    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
+         patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""):
+        mock_chat.side_effect = [tool_call_msg, final_msg]
+        mock_exec.return_value = ToolResult(
+            ok=False,
+            data="tool 'read_file' requires scope ['repo:read']",
+            error_type="scope_denied",
+            retryable=False,
+            recovery_hint="Add one of ['repo:read'] to allowed_scopes",
+        )
+
+        result = await run_agent("Read a file", max_iterations=5,
+                                  allowed_scopes=["memory:read"])
+
+    assert result.stopped_reason == "final_answer"
+    # The tool message in history should contain the scope_denied error
+    tool_messages = [m for m in result.message_history if m.get("role") == "tool"]
+    assert len(tool_messages) == 1
+    assert "scope_denied" in tool_messages[0]["content"]
