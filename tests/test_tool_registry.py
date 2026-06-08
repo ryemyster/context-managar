@@ -23,10 +23,12 @@ from app.tool_registry import (
     execute_tool,
     get_tool_definitions,
     get_tool_metadata,
+    _find_candidates,
     SCOPE_REPO_READ,
     SCOPE_MEMORY_READ,
     SCOPE_ENGINE_READ,
 )
+from app.agent_runner import _serialize_tool_result
 
 
 # ── get_tool_definitions ────────────────────────────────────────────────────────
@@ -101,7 +103,9 @@ async def test_scope_denied_when_tool_scope_not_in_allowed():
 @pytest.mark.asyncio
 async def test_scope_allowed_when_matching_scope_present():
     content = "line1\nline2\n"
-    with patch("app.tool_registry.safe_resolve", return_value=Path("/repos/owner/repo/f.py")), \
+    fake_path = MagicMock(spec=Path)
+    fake_path.exists.return_value = True
+    with patch("app.tool_registry.safe_resolve", return_value=fake_path), \
          patch("app.tool_registry._read_file", return_value=content):
         result = await execute_tool("read_file", {"file": "owner/repo/f.py"},
                                      allowed_scopes=["repo:read"])
@@ -119,7 +123,9 @@ async def test_update_plan_bypasses_scope_enforcement():
 async def test_all_scopes_permitted_when_allowed_scopes_is_none():
     """allowed_scopes=None means no restriction."""
     content = "hello"
-    with patch("app.tool_registry.safe_resolve", return_value=Path("/repos/owner/repo/f.py")), \
+    fake_path = MagicMock(spec=Path)
+    fake_path.exists.return_value = True
+    with patch("app.tool_registry.safe_resolve", return_value=fake_path), \
          patch("app.tool_registry._read_file", return_value=content):
         result = await execute_tool("read_file", {"file": "owner/repo/f.py"},
                                      allowed_scopes=None)
@@ -148,8 +154,10 @@ async def test_scan_directory_rejected_path():
 @pytest.mark.asyncio
 async def test_scan_directory_returns_file_list():
     fake_files = [Path("/repos/owner/repo/app/main.py"), Path("/repos/owner/repo/app/config.py")]
+    fake_base = MagicMock(spec=Path)
+    fake_base.exists.return_value = True
 
-    with patch("app.tool_registry.safe_resolve", return_value=Path("/repos/owner/repo/app")), \
+    with patch("app.tool_registry.safe_resolve", return_value=fake_base), \
          patch("app.tool_registry.walk_repo", return_value=fake_files), \
          patch("app.tool_registry.rel_path", side_effect=lambda p: str(p).replace("/repos/", "")):
         result = await execute_tool("scan_directory", {"path": "owner/repo/app"})
@@ -163,8 +171,10 @@ async def test_scan_directory_returns_file_list():
 @pytest.mark.asyncio
 async def test_scan_directory_truncates_large_result():
     many_files = [Path(f"/repos/owner/repo/f{i}.py") for i in range(500)]
+    fake_base = MagicMock(spec=Path)
+    fake_base.exists.return_value = True
 
-    with patch("app.tool_registry.safe_resolve", return_value=Path("/repos/owner/repo")), \
+    with patch("app.tool_registry.safe_resolve", return_value=fake_base), \
          patch("app.tool_registry.walk_repo", return_value=many_files), \
          patch("app.tool_registry.rel_path", side_effect=lambda p: str(p).replace("/repos/", "")):
         result = await execute_tool("scan_directory", {"path": "owner/repo"})
@@ -234,7 +244,10 @@ async def test_read_file_rejected_path():
 
 @pytest.mark.asyncio
 async def test_read_file_not_found():
-    with patch("app.tool_registry.safe_resolve", return_value=Path("/repos/owner/repo/missing.py")), \
+    """File exists on disk but content is empty/unreadable -> not_found."""
+    fake_path = MagicMock(spec=Path)
+    fake_path.exists.return_value = True
+    with patch("app.tool_registry.safe_resolve", return_value=fake_path), \
          patch("app.tool_registry._read_file", return_value=None):
         result = await execute_tool("read_file", {"file": "owner/repo/missing.py"})
     assert result.ok is False
@@ -244,7 +257,9 @@ async def test_read_file_not_found():
 @pytest.mark.asyncio
 async def test_read_file_returns_content():
     content = "line1\nline2\nline3\n"
-    with patch("app.tool_registry.safe_resolve", return_value=Path("/repos/owner/repo/app.py")), \
+    fake_path = MagicMock(spec=Path)
+    fake_path.exists.return_value = True
+    with patch("app.tool_registry.safe_resolve", return_value=fake_path), \
          patch("app.tool_registry._read_file", return_value=content):
         result = await execute_tool("read_file", {"file": "owner/repo/app.py"})
     assert result.ok is True
@@ -255,7 +270,9 @@ async def test_read_file_returns_content():
 @pytest.mark.asyncio
 async def test_read_file_offset_and_limit():
     content = "\n".join(f"line{i}" for i in range(1, 21))
-    with patch("app.tool_registry.safe_resolve", return_value=Path("/repos/owner/repo/app.py")), \
+    fake_path = MagicMock(spec=Path)
+    fake_path.exists.return_value = True
+    with patch("app.tool_registry.safe_resolve", return_value=fake_path), \
          patch("app.tool_registry._read_file", return_value=content):
         result = await execute_tool("read_file", {"file": "owner/repo/app.py", "offset": 5, "limit": 3})
     assert result.ok is True
@@ -459,3 +476,57 @@ async def test_update_plan_defaults_current_step_and_blockers():
     plan = json.loads(result.data)
     assert plan["current_step"] == 0
     assert plan["blockers"] == []
+
+
+# ── Confirmation Request pattern ───────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_scan_directory_nonexistent_path_returns_needs_confirmation():
+    fake_resolved = MagicMock(spec=Path)
+    fake_resolved.exists.return_value = False
+
+    with patch("app.tool_registry.safe_resolve", return_value=fake_resolved), \
+         patch("app.tool_registry._find_candidates",
+               return_value=["owner/repo/app", "owner/repo/tests"]):
+        result = await execute_tool("scan_directory", {"path": "owner/repo/nonexistent"})
+
+    assert result.ok is False
+    assert result.error_type == "needs_confirmation"
+    assert result.retryable is True
+    assert "owner/repo/app" in result.candidates
+
+
+@pytest.mark.asyncio
+async def test_read_file_nonexistent_returns_needs_confirmation():
+    fake_resolved = MagicMock(spec=Path)
+    fake_resolved.exists.return_value = False
+
+    with patch("app.tool_registry.safe_resolve", return_value=fake_resolved), \
+         patch("app.tool_registry._find_candidates",
+               return_value=["owner/repo/main.py", "owner/repo/config.py"]):
+        result = await execute_tool("read_file", {"file": "owner/repo/missing.py"})
+
+    assert result.ok is False
+    assert result.error_type == "needs_confirmation"
+    assert result.retryable is True
+    assert "owner/repo/main.py" in result.candidates
+
+
+def test_serialize_tool_result_includes_candidates():
+    result = ToolResult(
+        ok=False,
+        data="file not found: 'x.py'",
+        error_type="needs_confirmation",
+        retryable=True,
+        recovery_hint="Nearby files: ...",
+        candidates=["owner/repo/main.py", "owner/repo/config.py"],
+    )
+    serialized = _serialize_tool_result(result)
+    assert "owner/repo/main.py" in serialized
+    assert "Candidates:" in serialized
+
+
+def test_serialize_tool_result_no_candidates_when_empty():
+    result = ToolResult(ok=False, data="not found", error_type="not_found")
+    serialized = _serialize_tool_result(result)
+    assert "Candidates:" not in serialized

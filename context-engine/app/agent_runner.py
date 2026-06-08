@@ -63,6 +63,8 @@ def _serialize_tool_result(result: tool_registry.ToolResult) -> str:
     parts = [f"[{result.error_type}, retryable={result.retryable}] {result.data}"]
     if result.recovery_hint:
         parts.append(f"— {result.recovery_hint}")
+    if result.candidates:
+        parts.append(f"Candidates: {', '.join(result.candidates[:5])}")
     return " ".join(parts)
 
 

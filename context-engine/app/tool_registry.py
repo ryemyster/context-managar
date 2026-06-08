@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 from fastapi import HTTPException
@@ -39,9 +40,10 @@ from .search_worker import find_in_repo, grep_pattern
 class ToolResult:
     ok: bool
     data: str
-    error_type: str | None = None   # "path_rejected" | "not_found" | "invalid_input" | "engine_down" | "scope_denied"
+    error_type: str | None = None   # "path_rejected" | "not_found" | "invalid_input" | "engine_down" | "scope_denied" | "needs_confirmation"
     retryable: bool = False
     recovery_hint: str | None = None
+    candidates: list[str] = field(default_factory=list)
 
 
 # ── Tool metadata / scopes ─────────────────────────────────────────────────────
@@ -57,6 +59,20 @@ class ToolMeta:
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _find_candidates(resolved: Path, is_file: bool = False) -> list[str]:
+    """Walk up to the nearest existing ancestor and return its children as relative paths."""
+    anchor = resolved.parent if is_file else resolved
+    while not anchor.exists() and anchor != config.REPO_ROOT:
+        anchor = anchor.parent
+    if not anchor.exists() or anchor == config.REPO_ROOT:
+        return []
+    try:
+        children = sorted(anchor.iterdir())[:10]
+        return [rel_path(c) for c in children]
+    except PermissionError:
+        return []
+
 
 def _truncate(text: str) -> str:
     limit = config.AGENT_TOOL_RESULT_MAX_CHARS
@@ -280,6 +296,13 @@ async def _exec_scan_directory(arguments: dict) -> ToolResult:
                           recovery_hint=f"Expected 'owner/repo/subdir', got '{path}'")
     except Exception as e:
         return ToolResult(ok=False, data=str(e), error_type="engine_down", retryable=True)
+    if not base.exists():
+        candidates = _find_candidates(base, is_file=False)
+        hint = (f"'{path}' does not exist. Did you mean one of: {candidates[:5]}?"
+                if candidates else f"'{path}' does not exist.")
+        return ToolResult(ok=False, data=f"path not found: '{path}'",
+                          error_type="needs_confirmation", retryable=True,
+                          recovery_hint=hint, candidates=candidates)
     files = walk_repo(base)
     paths = [rel_path(f) for f in files]
     result = json.dumps({"path": path, "files": paths, "count": len(paths)}, indent=2)
@@ -321,6 +344,13 @@ async def _exec_read_file(arguments: dict) -> ToolResult:
                           recovery_hint=f"Expected 'owner/repo/path/to/file.py', got '{file}'")
     except Exception as e:
         return ToolResult(ok=False, data=str(e), error_type="engine_down", retryable=True)
+    if not resolved.exists():
+        candidates = _find_candidates(resolved, is_file=True)
+        hint = (f"'{file}' not found. Nearby files: {candidates[:5]}"
+                if candidates else f"'{file}' not found.")
+        return ToolResult(ok=False, data=f"file not found: '{file}'",
+                          error_type="needs_confirmation", retryable=True,
+                          recovery_hint=hint, candidates=candidates)
     # When paging past the first block, request enough bytes to cover the offset.
     needed_bytes = max(config.MAX_FILE_BYTES, (offset + int(limit or 200)) * 300)
     content = _read_file(resolved, max_bytes=min(needed_bytes, 2_000_000))
