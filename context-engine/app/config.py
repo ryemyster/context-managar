@@ -22,6 +22,7 @@ OLLAMA_REASON_PREDICT = 1024    # reasoning model needs room for chain-of-though
 # Agentic loop settings
 OLLAMA_AGENT_TIMEOUT        = float(os.getenv("OLLAMA_AGENT_TIMEOUT",        "600.0"))  # 10 min total wall-clock budget per agent run
 AGENT_MAX_ITERATIONS        = int(os.getenv("AGENT_MAX_ITERATIONS",          "10"))     # max think→act cycles before forced stop
+AGENT_MAX_REPAIR_ITERATIONS = int(os.getenv("AGENT_MAX_REPAIR_ITERATIONS",   "3"))      # max tool cycles in the single repair pass after a failed verification
 AGENT_TOOL_RESULT_MAX_CHARS = int(os.getenv("AGENT_TOOL_RESULT_MAX_CHARS",   "3000"))   # truncate tool results to protect context window
 
 # ── Paths ──────────────────────────────────────────────────────────────────────

@@ -34,7 +34,7 @@ class AgentResult:
     final_answer: str
     iterations: int
     tool_calls_made: list[dict] = field(default_factory=list)
-    # "final_answer" | "max_iterations" | "timeout" | "model_error"
+    # "final_answer" | "max_iterations" | "timeout" | "model_error" | "verification_failed"
     stopped_reason: str = "final_answer"
     message_history: list[dict] = field(default_factory=list)
     memory_context_used: bool = False
@@ -113,15 +113,78 @@ async def run_agent(
             memory_hits = memory_ctx.count("---") + 1
             messages[1]["content"] = task + "\n\n" + memory_ctx
 
-    tool_calls_made: list[dict] = []
-    plan_state: dict = {}
     t_start = time.monotonic()
-    final_answer  = ""
-    stopped_reason = "max_iterations"
-    iterations_done = 0
 
     log.info("agent_runner start task_len=%d tools=%d max_iter=%d memory=%s hits=%d",
              len(task), len(tool_defs), max_iter, "yes" if memory_ctx else "no", memory_hits)
+
+    final_answer, stopped_reason, iterations_done, tool_calls_made, plan_state = await _execute_loop(
+        messages, tool_defs, model, allowed_scopes, max_iter, t_start, budget
+    )
+
+    verification: dict = {}
+    if stopped_reason == "final_answer" and final_answer:
+        verification = await _verify_answer(task, final_answer, tool_calls_made, plan_state)
+        log.info("agent_runner verifier passed=%s", verification.get("passed"))
+
+        if verification.get("passed") is False:
+            repair_prompt = _build_repair_prompt(verification)
+            messages.append({"role": "user", "content": repair_prompt})
+            log.info("agent_runner repair_pass starting claims=%d",
+                     len(verification.get("unsupported_claims") or []))
+
+            repair_answer, repair_reason, repair_iters, repair_calls, repair_plan = await _execute_loop(
+                messages, tool_defs, model, allowed_scopes,
+                max_iter=config.AGENT_MAX_REPAIR_ITERATIONS,
+                t_start=t_start, budget=budget,
+            )
+            iterations_done += repair_iters
+            tool_calls_made.extend(repair_calls)
+            if repair_plan:
+                plan_state = repair_plan
+            if repair_answer:
+                final_answer = repair_answer
+                verification = await _verify_answer(task, final_answer, tool_calls_made, plan_state)
+                verification["repaired"] = True
+                log.info("agent_runner repair_verifier passed=%s", verification.get("passed"))
+
+            if not verification.get("passed"):
+                stopped_reason = "verification_failed"
+
+    log.info("agent_runner done stopped=%s iterations=%d tool_calls=%d dur=%.1fs",
+             stopped_reason, iterations_done, len(tool_calls_made), time.monotonic() - t_start)
+
+    return AgentResult(
+        final_answer=final_answer,
+        iterations=iterations_done,
+        tool_calls_made=tool_calls_made,
+        stopped_reason=stopped_reason,
+        message_history=messages,
+        memory_context_used=bool(memory_ctx),
+        memory_hits=memory_hits,
+        plan_state=plan_state,
+        verification=verification,
+    )
+
+
+async def _execute_loop(
+    messages: list[dict],
+    tool_defs: list[dict],
+    model: str | None,
+    allowed_scopes: list[str] | None,
+    max_iter: int,
+    t_start: float,
+    budget: float,
+) -> tuple[str, str, int, list[dict], dict]:
+    """
+    Core think→act loop. Appends to messages in place.
+    Returns (final_answer, stopped_reason, iterations_done, tool_calls_made, plan_state).
+    """
+    tool_calls_made: list[dict] = []
+    plan_state: dict = {}
+    final_answer = ""
+    stopped_reason = "max_iterations"
+    iterations_done = 0
 
     for i in range(max_iter):
         iterations_done = i + 1
@@ -139,22 +202,20 @@ async def run_agent(
         if "error" in message:
             log.error("agent_runner model error iter=%d: %s", i + 1, message["error"])
             stopped_reason = "model_error"
-            final_answer   = f"[agent stopped: {message['error']}]"
+            final_answer = f"[agent stopped: {message['error']}]"
             break
 
-        # Append the assistant turn (normalize role field)
         assistant_msg = dict(message)
         assistant_msg.setdefault("role", "assistant")
         messages.append(assistant_msg)
 
         tool_calls = message.get("tool_calls") or []
         if not tool_calls:
-            final_answer   = (message.get("content") or "").strip()
+            final_answer = (message.get("content") or "").strip()
             stopped_reason = "final_answer"
             log.info("agent_runner final_answer iter=%d dur=%.1fs", i + 1, time.monotonic() - t_start)
             break
 
-        # Execute each tool call and feed results back as tool messages
         for tc in tool_calls:
             fn        = tc.get("function", {})
             name      = fn.get("name", "")
@@ -163,7 +224,6 @@ async def run_agent(
 
             result = await tool_registry.execute_tool(name, arguments, allowed_scopes=allowed_scopes)
 
-            # Capture plan state whenever the model calls update_plan
             if name == "update_plan" and result.ok:
                 try:
                     plan_state = json.loads(result.data)
@@ -174,33 +234,29 @@ async def run_agent(
             tool_calls_made.append({
                 "name":      name,
                 "arguments": arguments,
-                "result":    serialized[:300],   # truncate trace entry; full result is in messages
+                "result":    serialized[:300],
             })
             messages.append({"role": "tool", "content": serialized})
-
     else:
-        # for-loop exhausted without break → max_iterations hit
-        final_answer = _last_assistant_content(messages) or f"[agent completed {max_iter} iterations without a conclusive answer]"
+        final_answer = (
+            _last_assistant_content(messages)
+            or f"[agent completed {max_iter} iterations without a conclusive answer]"
+        )
 
-    verification: dict = {}
-    if stopped_reason == "final_answer" and final_answer:
-        verification = await _verify_answer(task, final_answer, tool_calls_made, plan_state)
-        log.info("agent_runner verifier passed=%s", verification.get("passed"))
+    return final_answer, stopped_reason, iterations_done, tool_calls_made, plan_state
 
-    log.info("agent_runner done stopped=%s iterations=%d tool_calls=%d dur=%.1fs",
-             stopped_reason, iterations_done, len(tool_calls_made), time.monotonic() - t_start)
 
-    return AgentResult(
-        final_answer=final_answer,
-        iterations=iterations_done,
-        tool_calls_made=tool_calls_made,
-        stopped_reason=stopped_reason,
-        message_history=messages,
-        memory_context_used=bool(memory_ctx),
-        memory_hits=memory_hits,
-        plan_state=plan_state,
-        verification=verification,
-    )
+def _build_repair_prompt(verification: dict) -> str:
+    """Build the repair injection message from a failed verification result."""
+    parts = ["Your previous answer was flagged by the verifier."]
+    rationale = verification.get("rationale", "")
+    if rationale:
+        parts.append(f"Reason: {rationale}")
+    claims = verification.get("unsupported_claims") or []
+    if claims:
+        parts.append(f"Unsupported claims that need evidence: {'; '.join(claims)}")
+    parts.append("Use tools to gather the missing evidence, then provide a corrected final answer.")
+    return " ".join(parts)
 
 
 async def _verify_answer(

@@ -12,7 +12,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'context-engine'))
 
 from unittest.mock import AsyncMock, patch, MagicMock
-from app.agent_runner import AgentResult, _coerce_arguments, run_agent, _verify_answer
+from app.agent_runner import AgentResult, _coerce_arguments, run_agent, _verify_answer, _build_repair_prompt
 from app.tool_registry import ToolResult
 
 
@@ -484,3 +484,123 @@ async def test_run_agent_verification_empty_on_max_iterations():
     assert result.stopped_reason == "max_iterations"
     assert result.verification == {}
     mock_gen.assert_not_called()
+
+
+# ── repair iteration ───────────────────────────────────────────────────────────
+
+def test_build_repair_prompt_includes_claims_and_rationale():
+    v = {
+        "passed": False,
+        "rationale": "No evidence for the websocket claim.",
+        "unsupported_claims": ["websocket handler exists", "routes return JSON"],
+    }
+    prompt = _build_repair_prompt(v)
+    assert "No evidence for the websocket claim." in prompt
+    assert "websocket handler exists" in prompt
+    assert "routes return JSON" in prompt
+    assert "Use tools" in prompt
+
+
+def test_build_repair_prompt_handles_empty_claims():
+    v = {"passed": False, "rationale": "Answer is vague.", "unsupported_claims": []}
+    prompt = _build_repair_prompt(v)
+    assert "Answer is vague." in prompt
+    assert "Candidates" not in prompt  # no claim list injected
+
+
+@pytest.mark.asyncio
+async def test_run_agent_repair_succeeds_updates_stopped_reason():
+    """When first verification fails, repair pass fires and re-verification passes."""
+    first_final = {"role": "assistant", "content": "Partial answer.", "tool_calls": []}
+    repair_final = {"role": "assistant", "content": "Corrected answer.", "tool_calls": []}
+
+    fail_verif = {"passed": False, "rationale": "Missing evidence.", "unsupported_claims": ["claim X"]}
+    pass_verif = {"passed": True, "rationale": "Evidence found.", "unsupported_claims": [], "evidence_gap": False}
+
+    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
+         patch("app.agent_runner._verify_answer", new_callable=AsyncMock) as mock_verify:
+        mock_chat.side_effect = [first_final, repair_final]
+        mock_verify.side_effect = [fail_verif, pass_verif]
+
+        result = await run_agent("Find routes", max_iterations=5)
+
+    assert result.stopped_reason == "final_answer"
+    assert result.final_answer == "Corrected answer."
+    assert result.verification.get("passed") is True
+    assert result.verification.get("repaired") is True
+    assert mock_verify.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_run_agent_verification_failed_when_repair_also_fails():
+    """When repair pass also fails verification, stopped_reason is verification_failed."""
+    first_final = {"role": "assistant", "content": "Bad answer.", "tool_calls": []}
+    repair_final = {"role": "assistant", "content": "Still bad.", "tool_calls": []}
+
+    fail_verif = {"passed": False, "rationale": "Still no evidence.", "unsupported_claims": ["claim X"]}
+
+    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
+         patch("app.agent_runner._verify_answer", new_callable=AsyncMock, return_value=fail_verif):
+        mock_chat.side_effect = [first_final, repair_final]
+
+        result = await run_agent("Find routes", max_iterations=5)
+
+    assert result.stopped_reason == "verification_failed"
+    assert result.final_answer == "Still bad."
+    assert result.verification.get("passed") is False
+    assert result.verification.get("repaired") is True
+
+
+@pytest.mark.asyncio
+async def test_run_agent_no_repair_when_verification_passes():
+    """When first verification passes, repair pass is never entered."""
+    final_msg = {"role": "assistant", "content": "Good answer.", "tool_calls": []}
+    pass_verif = {"passed": True, "rationale": "All good.", "unsupported_claims": [], "evidence_gap": False}
+
+    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
+         patch("app.agent_runner._verify_answer", new_callable=AsyncMock, return_value=pass_verif) as mock_verify:
+        mock_chat.return_value = final_msg
+
+        result = await run_agent("Find routes", max_iterations=5)
+
+    assert result.stopped_reason == "final_answer"
+    assert result.verification.get("repaired") is not True
+    mock_verify.assert_called_once()  # only the initial verification, no repair
+
+
+@pytest.mark.asyncio
+async def test_run_agent_repair_prompt_injected_as_user_message():
+    """The repair prompt is injected as a user-role message before the repair loop."""
+    first_final = {"role": "assistant", "content": "Incomplete.", "tool_calls": []}
+    repair_final = {"role": "assistant", "content": "Fixed.", "tool_calls": []}
+
+    fail_verif = {"passed": False, "rationale": "Missing data.", "unsupported_claims": ["missing claim"]}
+    pass_verif = {"passed": True, "rationale": "Good now.", "unsupported_claims": [], "evidence_gap": False}
+
+    captured_messages: list[list] = []
+
+    async def capture_chat(messages, tools, model=None):
+        captured_messages.append(list(messages))
+        if len(captured_messages) == 1:
+            return first_final
+        return repair_final
+
+    with patch("app.agent_runner.ollama_client.chat_with_tools", side_effect=capture_chat), \
+         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
+         patch("app.agent_runner._verify_answer", new_callable=AsyncMock,
+               side_effect=[fail_verif, pass_verif]):
+        await run_agent("Find routes", max_iterations=5)
+
+    # The second chat call should have a user message containing the repair instructions
+    second_call_messages = captured_messages[1]
+    user_msgs = [m for m in second_call_messages if m.get("role") == "user"]
+    repair_user_msgs = [m for m in user_msgs if "flagged" in m.get("content", "")]
+    assert len(repair_user_msgs) == 1
+    assert "missing claim" in repair_user_msgs[0]["content"]
