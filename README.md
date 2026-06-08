@@ -141,12 +141,13 @@ The engine runs a think → act loop:
 1. Receives a task via `POST /agents/run`
 2. Pre-flight: auto-injects prior memory from `search_memory` (if not scope-restricted)
 3. Calls `qwen3.5:9b` with tool definitions: `search_memory`, `update_plan`, `scan_directory`, `find_in_code`, `read_file`, `grep`, `health_check`
-4. Model calls tools → `ToolResult` envelopes (ok, error_type, retryable, recovery_hint) fed back as observations
+4. Model calls tools → `ToolResult` envelopes (ok, error_type, retryable, recovery_hint, candidates) fed back as observations; a `needs_confirmation` error includes candidate paths so the model can self-correct on bad paths
 5. Model may call `update_plan` to record its goal and steps as first-class plan state
 6. Loops until the model produces a final answer, or hits max_iterations / timeout
-7. Result persisted to Supabase + disk; poll `GET /agents/run/status/{run_id}` for completion
+7. Post-hoc verifier (`_verify_answer`) checks coherence of the final answer against tool evidence; if it fails, a repair pass re-runs the loop with unsupported claims injected, then re-verifies
+8. Result persisted to Supabase + disk; poll `GET /agents/run/status/{run_id}` for completion
 
-Response includes: `final_answer`, `tool_calls_made`, `iterations`, `stopped_reason`, `memory_context_used`, `memory_hits`, `plan_state`
+Response includes: `final_answer`, `tool_calls_made`, `iterations`, `stopped_reason` (`final_answer` | `max_iterations` | `timeout` | `model_error` | `verification_failed`), `memory_context_used`, `memory_hits`, `plan_state`, `verification` (`{passed, rationale, unsupported_claims, evidence_gap, repaired?}`)
 
 **Scope restriction:** pass `allowed_scopes: ["repo:read"]` to limit the agent to file-exploration tools only; `memory:read` and `engine:read` tools will return `scope_denied`. `update_plan` always runs regardless of scopes.
 
@@ -576,3 +577,4 @@ The `tips` field maps each failure mode to its fix.
 | `repo_mounted: false` | `REPO_ROOT` in plist/`.env` doesn't exist or isn't a directory |
 | Port 8088 conflict | `lsof -i :8088` — find and stop the other process |
 | Agent loop hits max_iterations | Increase `AGENT_MAX_ITERATIONS` or narrow the task scope |
+| `stopped_reason: "verification_failed"` | Verifier flagged the answer twice; check `verification.unsupported_claims` and narrow the task or increase `AGENT_MAX_REPAIR_ITERATIONS` |
