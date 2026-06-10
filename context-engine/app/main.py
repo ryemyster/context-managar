@@ -1298,14 +1298,47 @@ async def agents_tools():
 
 async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
     """Background worker for POST /agents/run."""
+    _wall_limit = config.OLLAMA_AGENT_TIMEOUT + 120  # agent budget + Ollama overhead
     try:
-        result = await agent_runner.run_agent(
-            task=req.task,
-            tools=req.tools or None,
-            system_prompt=req.system_prompt,
-            max_iterations=req.max_iterations,
-            allowed_scopes=req.allowed_scopes,
+        result = await asyncio.wait_for(
+            agent_runner.run_agent(
+                task=req.task,
+                tools=req.tools or None,
+                system_prompt=req.system_prompt,
+                max_iterations=req.max_iterations,
+                allowed_scopes=req.allowed_scopes,
+            ),
+            timeout=_wall_limit,
         )
+    except asyncio.TimeoutError:
+        log.error("agent/run background wall-clock timeout run_id=%s limit=%.0fs", run_id, _wall_limit)
+        artifact_store.write_record(
+            event_id=run_id,
+            tool="agents/run",
+            request=req.model_dump(),
+            response={
+                "run_id": run_id, "status": "timeout", "task": req.task,
+                "final_answer": "[agent timed out — wall-clock limit exceeded]",
+                "tool_calls_made": [], "iterations": 0,
+                "stopped_reason": "timeout",
+                "warnings": [f"wall-clock limit of {_wall_limit:.0f}s exceeded"],
+            },
+            status="timeout",
+        )
+        return
+    except Exception:
+        log.error("agent/run background error run_id=%s\n%s", run_id, traceback.format_exc())
+        artifact_store.write_record(
+            event_id=run_id,
+            tool="agents/run",
+            request=req.model_dump(),
+            response={"run_id": run_id, "status": "error", "task": req.task,
+                      "final_answer": "", "tool_calls_made": [], "iterations": 0,
+                      "stopped_reason": "error", "warnings": ["background task failed — check logs"]},
+            status="error",
+        )
+        return
+    try:
         written = mw.write_agent_run(
             task=req.task,
             final_answer=result.final_answer,

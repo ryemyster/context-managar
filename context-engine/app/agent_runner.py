@@ -94,6 +94,10 @@ async def run_agent(
     """
     max_iter  = max_iterations if max_iterations is not None else config.AGENT_MAX_ITERATIONS
     budget    = config.OLLAMA_AGENT_TIMEOUT
+    if tools:
+        unknown = [t for t in tools if t not in tool_registry.ALL_TOOLS]
+        if unknown:
+            raise ValueError(f"unknown tools: {unknown}. Available: {tool_registry.ALL_TOOLS}")
     tool_defs = tool_registry.get_tool_definitions(tools)
     system    = system_prompt or _DEFAULT_SYSTEM_PROMPT
 
