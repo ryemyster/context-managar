@@ -10,6 +10,9 @@ from pathlib import Path
 OLLAMA_HOST         = os.getenv("OLLAMA_HOST",         "http://founderos-ollama:11434")
 OLLAMA_MODEL        = os.getenv("OLLAMA_MODEL",        "qwen2.5-coder:3b")
 OLLAMA_REASON_MODEL = os.getenv("OLLAMA_REASON_MODEL", "qwen3.5:9b")
+OLLAMA_AGENT_MODEL  = os.getenv("OLLAMA_AGENT_MODEL",  OLLAMA_MODEL)
+OLLAMA_AGENT_SELECT_MODEL = os.getenv("OLLAMA_AGENT_SELECT_MODEL", OLLAMA_MODEL)
+OLLAMA_AGENT_VERIFY_MODEL = os.getenv("OLLAMA_AGENT_VERIFY_MODEL", OLLAMA_MODEL)
 OLLAMA_EMBED_MODEL  = os.getenv("OLLAMA_EMBED_MODEL",  "nomic-embed-text")
 
 # Inference settings — tuned for 3b code model (~3.6s) / 9b reasoning on M3 16GB
@@ -21,6 +24,11 @@ OLLAMA_REASON_PREDICT = 1024    # reasoning model needs room for chain-of-though
 
 # Agentic loop settings
 OLLAMA_AGENT_TIMEOUT        = float(os.getenv("OLLAMA_AGENT_TIMEOUT",        "600.0"))  # 10 min total wall-clock budget per agent run
+OLLAMA_AGENT_CALL_TIMEOUT   = float(os.getenv("OLLAMA_AGENT_CALL_TIMEOUT",   "90.0"))   # each model turn must leave time for tools and verification
+OLLAMA_AGENT_SELECT_TIMEOUT = float(os.getenv("OLLAMA_AGENT_SELECT_TIMEOUT", "45.0"))   # schema-constrained next-action selection
+OLLAMA_AGENT_MEMORY_TIMEOUT = float(os.getenv("OLLAMA_AGENT_MEMORY_TIMEOUT", "10.0"))   # memory is useful but must not block the agent
+OLLAMA_AGENT_VERIFY_TIMEOUT = float(os.getenv("OLLAMA_AGENT_VERIFY_TIMEOUT", "60.0"))   # verification degrades gracefully when reasoning is slow
+OLLAMA_AGENT_NUM_PREDICT    = int(os.getenv("OLLAMA_AGENT_NUM_PREDICT",      "400"))    # bound each tool-selection/final-answer response
 AGENT_MAX_ITERATIONS        = int(os.getenv("AGENT_MAX_ITERATIONS",          "10"))     # max think→act cycles before forced stop
 AGENT_MAX_REPAIR_ITERATIONS = int(os.getenv("AGENT_MAX_REPAIR_ITERATIONS",   "3"))      # max tool cycles in the single repair pass after a failed verification
 AGENT_TOOL_RESULT_MAX_CHARS = int(os.getenv("AGENT_TOOL_RESULT_MAX_CHARS",   "3000"))   # truncate tool results to protect context window

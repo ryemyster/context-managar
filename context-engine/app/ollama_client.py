@@ -130,9 +130,10 @@ async def chat_with_tools(
     messages: list[dict],
     tools: list[dict],
     model: str | None = None,
+    timeout: float | None = None,
 ) -> dict:
     """
-    Call Ollama /api/chat with tool definitions (uses reasoning model by default).
+    Call Ollama /api/chat with tool definitions (uses the agent model by default).
 
     Returns the raw message dict from the response:
     - message.tool_calls present  → model wants to call a tool
@@ -140,7 +141,8 @@ async def chat_with_tools(
 
     Never raises — returns {"error": str} so agent_runner can detect and stop the loop.
     """
-    use_model = model or config.OLLAMA_REASON_MODEL
+    use_model = model or config.OLLAMA_AGENT_SELECT_MODEL
+    request_timeout = timeout or config.OLLAMA_AGENT_CALL_TIMEOUT
     log.debug("ollama chat_with_tools model=%s messages=%d tools=%d", use_model, len(messages), len(tools))
     t0 = time.monotonic()
     try:
@@ -151,12 +153,14 @@ async def chat_with_tools(
                 "messages": messages,
                 "tools":    tools,
                 "stream":   False,
+                "think":    False,
                 "options": {
                     "temperature": 0.1,
                     "num_ctx":     config.OLLAMA_NUM_CTX,
+                    "num_predict": config.OLLAMA_AGENT_NUM_PREDICT,
                 },
             },
-            timeout=config.OLLAMA_REASON_TIMEOUT,
+            timeout=request_timeout,
         )
         r.raise_for_status()
         message = r.json().get("message", {})
@@ -165,9 +169,226 @@ async def chat_with_tools(
         return message
     except httpx.TimeoutException:
         log.warning("ollama chat_with_tools timeout model=%s dur=%.2fs", use_model, time.monotonic() - t0)
-        return {"error": "timeout — model took too long, try fewer iterations or a simpler task"}
+        return {"error": f"timeout after {request_timeout:.0f}s — model took too long"}
     except Exception as e:
         log.error("ollama chat_with_tools error: %s", e)
+        return {"error": str(e)}
+
+
+async def select_tool_call(
+    messages: list[dict],
+    tools: list[dict],
+    model: str | None = None,
+    timeout: float | None = None,
+) -> dict:
+    """Select the next agent action through schema-constrained JSON."""
+    use_model = model or config.OLLAMA_AGENT_MODEL
+    request_timeout = timeout or config.OLLAMA_AGENT_SELECT_TIMEOUT
+    names = [
+        tool.get("function", {}).get("name")
+        for tool in tools
+        if tool.get("function", {}).get("name")
+    ]
+    if not names:
+        return {"error": "no enabled tools"}
+
+    conversation = []
+    for message in messages[-8:]:
+        content = str(message.get("content") or "")
+        conversation.append({
+            "role": message.get("role", ""),
+            "content": content[:2500],
+        })
+    compact_tools = [
+        {
+            "name": tool["function"]["name"],
+            "description": tool["function"].get("description", ""),
+            "parameters": tool["function"].get("parameters", {}),
+        }
+        for tool in tools
+        if tool.get("function", {}).get("name")
+    ]
+    prompt = (
+        f"Conversation and evidence:\n{json.dumps(conversation, separators=(',', ':'))}\n\n"
+        f"Enabled tools:\n{json.dumps(compact_tools, separators=(',', ':'))}\n\n"
+        "Choose the next action. Use call_tool only when more repository evidence "
+        "is required. Use final_answer when the existing tool evidence is enough. "
+        "Never repeat an identical successful tool call."
+    )
+    try:
+        r = await get_client().post(
+            "/api/chat",
+            json={
+                "model": use_model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Choose the next repository-agent action. Return only "
+                            "the JSON object required by the response schema."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                "format": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["call_tool", "final_answer"],
+                        },
+                        "name": {"type": "string", "enum": names},
+                        "arguments": {"type": "object"},
+                        "final_answer": {"type": "string"},
+                    },
+                    "required": ["action", "name", "arguments", "final_answer"],
+                },
+                "stream": False,
+                "think": False,
+                "options": {
+                    "temperature": 0,
+                    "num_ctx": config.OLLAMA_NUM_CTX,
+                    "num_predict": 200,
+                },
+            },
+            timeout=request_timeout,
+        )
+        r.raise_for_status()
+        parsed = parse_json_response(r.json().get("message", {}).get("content", ""))
+        if parsed.get("action") == "final_answer":
+            final_answer = str(parsed.get("final_answer") or "").strip()
+            if final_answer:
+                return {"final_answer": final_answer}
+            return {"error": "structured action returned an empty final answer"}
+        name = parsed.get("name")
+        arguments = parsed.get("arguments")
+        if parsed.get("action") != "call_tool" or name not in names or not isinstance(arguments, dict):
+            return {"error": "structured tool selection returned an invalid call"}
+        return {"function": {"name": name, "arguments": arguments}}
+    except httpx.TimeoutException:
+        return {"error": f"structured tool selection timed out after {request_timeout:.0f}s"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+async def verify_agent_answer(
+    prompt: str,
+    model: str | None = None,
+    timeout: float | None = None,
+) -> dict:
+    """Run the agent evidence check with schema-constrained JSON."""
+    use_model = model or config.OLLAMA_AGENT_VERIFY_MODEL
+    request_timeout = timeout or config.OLLAMA_AGENT_VERIFY_TIMEOUT
+    try:
+        r = await get_client().post(
+            "/api/chat",
+            json={
+                "model": use_model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Evaluate whether the answer is supported by the "
+                            "provided tool evidence. Return only the required JSON."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                "format": {
+                    "type": "object",
+                    "properties": {
+                        "passed": {"type": "boolean"},
+                        "rationale": {"type": "string"},
+                        "unsupported_claims": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "evidence_gap": {"type": "boolean"},
+                    },
+                    "required": [
+                        "passed",
+                        "rationale",
+                        "unsupported_claims",
+                        "evidence_gap",
+                    ],
+                },
+                "stream": False,
+                "think": False,
+                "options": {
+                    "temperature": 0,
+                    "num_ctx": config.OLLAMA_NUM_CTX,
+                    "num_predict": 200,
+                },
+            },
+            timeout=request_timeout,
+        )
+        r.raise_for_status()
+        parsed = parse_json_response(r.json().get("message", {}).get("content", ""))
+        if "passed" not in parsed:
+            return {"error": "parse_failed"}
+        return parsed
+    except httpx.TimeoutException:
+        return {"error": "verifier_timeout"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+async def answer_from_evidence(
+    messages: list[dict],
+    model: str | None = None,
+    timeout: float | None = None,
+) -> dict:
+    """Produce a final answer from accumulated tool evidence without exposing tools."""
+    use_model = model or config.OLLAMA_AGENT_MODEL
+    request_timeout = timeout or config.OLLAMA_AGENT_SELECT_TIMEOUT
+    conversation = [
+        {
+            "role": message.get("role", ""),
+            "content": str(message.get("content") or "")[:3000],
+        }
+        for message in messages[-8:]
+    ]
+    try:
+        r = await get_client().post(
+            "/api/chat",
+            json={
+                "model": use_model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Answer the repository task using only the accumulated "
+                            "tool evidence. Be concise and cite repository-relative paths. "
+                            "Return only the required JSON."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(conversation, separators=(",", ":")),
+                    },
+                ],
+                "format": {
+                    "type": "object",
+                    "properties": {"final_answer": {"type": "string"}},
+                    "required": ["final_answer"],
+                },
+                "stream": False,
+                "think": False,
+                "options": {
+                    "temperature": 0,
+                    "num_ctx": config.OLLAMA_NUM_CTX,
+                    "num_predict": config.OLLAMA_AGENT_NUM_PREDICT,
+                },
+            },
+            timeout=request_timeout,
+        )
+        r.raise_for_status()
+        parsed = parse_json_response(r.json().get("message", {}).get("content", ""))
+        answer = str(parsed.get("final_answer") or "").strip()
+        return {"final_answer": answer} if answer else {"error": "empty final answer"}
+    except httpx.TimeoutException:
+        return {"error": f"answer synthesis timed out after {request_timeout:.0f}s"}
+    except Exception as e:
         return {"error": str(e)}
 
 

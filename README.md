@@ -13,7 +13,7 @@ Spend Claude tokens on judgment.
 
 ## What it does
 
-Any agent — Claude Code, Codex, Zed AI, or your own scripts — can delegate work to it via REST or MCP and get structured results back. It autonomously decides what to scan, what to grep, and what to read, loops until it has real evidence, then returns a conclusion.
+Any agent — Claude Code, Codex, or another MCP host — can delegate work through the thin MCP adapter and get structured results back. Existing REST clients and scripts remain supported. The Context Engine Agent autonomously decides what to scan, grep, and read, loops until it has real evidence, verifies its conclusion, and repairs unsupported answers.
 
 It also exposes individual deterministic endpoints (scan, find, summarize, context, diff, vector search) that callers can invoke directly without going through the agentic loop.
 
@@ -26,11 +26,10 @@ It also exposes individual deterministic endpoints (scan, find, summarize, conte
 │  Callers                                                            │
 │                                                                     │
 │  Claude Code ──┐                                                    │
-│  Codex        ─┤─ REST  ──────────────────────────────────────┐    │
-│  curl/scripts ─┘    POST /agents/run                          │    │
-│                      GET  /agents/run/status/{run_id}         │    │
-│  Zed AI ───────── MCP stdio ──────────────────────────────┐   │    │
-│  Cursor/Neovim     (mcp_server.py adapts REST → MCP)      │   │    │
+│  Codex        ─┤─ MCP HTTP :8089/mcp ───────────────────────┐     │
+│  other hosts  ─┘  investigate_codebase · load_context      │     │
+│                   review_diff · audit_issue                 │     │
+│  curl/scripts ── REST compatibility ────────────────────┐   │     │
 └───────────────────────────────────────────────────────────┼───┼────┘
                                                             │   │
                           ┌─────────────────────────────────┘   │
@@ -76,11 +75,27 @@ For cloud: put a TLS-terminating reverse proxy (nginx, Caddy, cloud load balance
 
 | Model | Env var | Used by |
 |-------|---------|---------|
-| `qwen2.5-coder:3b` | `OLLAMA_MODEL` | `/context`, `/scan`, `/find`, `/summarize`, agent tool loop |
-| `qwen3.5:9b` | `OLLAMA_REASON_MODEL` | `/diff-summary`, `/agents/run` (tool-calling loop) |
+| `qwen2.5-coder:3b` | `OLLAMA_MODEL` | `/context`, `/scan`, `/find`, `/summarize` |
+| `qwen2.5-coder:3b` | `OLLAMA_AGENT_MODEL` | `/agents/run` answer generation |
+| `qwen2.5-coder:3b` | `OLLAMA_AGENT_SELECT_MODEL` | `/agents/run` schema-constrained tool selection |
+| `qwen2.5-coder:3b` | `OLLAMA_AGENT_VERIFY_MODEL` | `/agents/run` schema-constrained evidence verification |
+| `qwen3.5:9b` | `OLLAMA_REASON_MODEL` | `/diff-summary`, agent verification |
 | `nomic-embed-text` | `OLLAMA_EMBED_MODEL` | `/index`, `/vector-search`, `/context` (vector step) |
 
-Routing rule: `/diff-summary` and `/agents/run` → `chat_with_tools()` / `generate_reasoning()` (judgment). Everything else → `generate()` (code pattern matching) or `embed()`.
+Routing rule: `/agents/run` uses the fast 3B model with JSON schemas for tool selection and verification. `/diff-summary` keeps the 9B reasoning model. Everything else uses `generate()` or `embed()`.
+
+Agent memory preflight is best-effort and defaults to a 10-second ceiling. Each
+agent model turn defaults to 90 seconds, below the total 600-second run budget,
+so an unhealthy Ollama process returns a structured model error instead of
+stalling until the outer worker timeout. Post-run verification has a separate
+60-second ceiling and degrades to `verifier_timeout` without discarding the
+agent result.
+
+The agent prompt is built from the tools enabled for each run. Unsupported prose
+is not accepted as a final answer before a tool returns evidence, and valid tool
+calls emitted as JSON text are recovered and executed inside the agent loop. A
+schema-constrained next-action pass uses the fast model to choose either one
+enabled tool or a final answer from accumulated evidence.
 
 ---
 
@@ -151,7 +166,17 @@ Response includes: `final_answer`, `tool_calls_made`, `iterations`, `stopped_rea
 
 **Scope restriction:** pass `allowed_scopes: ["repo:read"]` to limit the agent to file-exploration tools only; `memory:read` and `engine:read` tools will return `scope_denied`. `update_plan` always runs regardless of scopes.
 
-**MCP callers (Zed, Cursor, etc.)** talk to `mcp_server.py` which is a thin stdio adapter that translates MCP JSON-RPC 2.0 to the same REST endpoints. No separate process — the engine keeps running independently.
+**MCP callers** connect to the persistent Streamable HTTP service at
+`http://127.0.0.1:8089/mcp`. `mcp_http_server.py` delegates to the shared thin
+adapter, which translates high-level MCP calls to the same REST endpoints. It
+contains no planning, verification, repository scanning, or agent loop logic.
+The REST engine and MCP transport run as independent launchd services.
+
+The primary MCP tool is `investigate_codebase`. It starts `/agents/run`, polls
+the run status, and returns the completed `final_answer`, `tool_calls_made`,
+`verification`, `iterations`, and `plan_state` in one MCP response. This keeps
+the Context Engine Agent, not the calling orchestrator, in the junior engineer
+role.
 
 ---
 
@@ -284,9 +309,9 @@ Test coverage:
 
 | File | What's tested |
 |------|--------------|
-| `tests/test_agent_runner.py` | `_coerce_arguments` edge cases; all 5 stop conditions (final_answer, model_error, max_iterations, timeout, string arg coercion, custom prompts, message history) |
-| `tests/test_tool_registry.py` | `get_tool_definitions`, `execute_tool` dispatch, all 5 executors (scan, find, read with paging, grep, health_check) including path rejection and truncation |
-| `tests/test_mcp_server.py` | MCP JSON-RPC dispatch (initialize, ping, tools/list, tools/call, notifications, unknown methods), `_fetch_tools` schema conversion, `_call_tool` timeout |
+| `tests/test_agent_runner.py` | Argument coercion, stop conditions, prompts, memory, planning, verification, and repair behavior |
+| `tests/test_tool_registry.py` | Registry dispatch, seven internal agent tools, scopes, recovery envelopes, paging, and truncation |
+| `tests/test_mcp_server.py` | Tool ordering and schemas, REST endpoint mapping, async polling, auth forwarding, structured results, and MCP JSON-RPC dispatch |
 | `tests/test_artifact_store.py` | Artifact record writes, typed vector paths |
 | `tests/test_context_builder.py` | Context bundle helpers, path filtering, suggestion ranking |
 | `tests/test_issue_auditor.py` | Evidence classification, rule-based recommendations, findings edge cases |
@@ -482,31 +507,47 @@ LOG_LEVEL=INFO
 
 ---
 
-## MCP integration (Zed, Cursor, Neovim)
+## MCP integration
 
-`context-engine/mcp_server.py` is a standalone MCP stdio server. Editors spawn it as a subprocess; it translates MCP JSON-RPC 2.0 calls into REST calls to `localhost:8088`.
+`context-engine/mcp_http_server.py` is a persistent Streamable HTTP MCP server
+managed by launchd. It translates MCP calls into REST calls to the existing
+service at `localhost:8088`.
 
-### Zed
+### Install or restart the MCP service
 
-Add to `~/.config/zed/settings.json`:
-
-```json
-"context_servers": {
-  "context-engine": {
-    "enabled": true,
-    "command": "/Users/<you>/Repos/ryemyster/context-manager/context-engine/.venv/bin/python",
-    "args": ["/Users/<you>/Repos/ryemyster/context-manager/context-engine/mcp_server.py"]
-  }
-}
+```bash
+bash scripts/install-mcp.sh
 ```
 
-Requires the REST service to be running at `localhost:8088`. The MCP server is just an adapter — start/stop it independently.
+The service is registered as `life.ascendvent.context-engine-mcp`, listens only
+on `127.0.0.1:8089`, and exposes MCP at `/mcp`.
 
-### Other MCP-compatible editors
+### Claude Code
 
-Same pattern: run `mcp_server.py` as the command, no args. It reads stdin and writes stdout per MCP spec.
+```bash
+claude mcp add --scope user --transport http \
+  context-engine http://127.0.0.1:8089/mcp
+```
 
-The MCP server exposes the same 5 tools as `/agents/tools` (scan_directory, find_in_code, read_file, grep, health_check). Any editor that can call MCP tools can use all of them.
+### Codex
+
+```bash
+codex mcp add context-engine --url http://127.0.0.1:8089/mcp
+```
+
+Configuration examples:
+
+- `config/claude-code.mcp.json.example`
+- `config/codex.config.toml.example`
+- `docs/mcp-integration.md`
+
+The MCP service requires the REST service to be running. Its launchd
+configuration forwards to `http://127.0.0.1:8088` by default.
+
+Primary tools are `investigate_codebase`, `load_context`, `review_diff`, and
+`audit_issue`. Advanced direct tools expose `/scan`, `/find`, `/summarize`,
+`/dependencies`, and `/vector-search`. Orchestrators should prefer
+`investigate_codebase` instead of manually chaining advanced tools.
 
 ---
 

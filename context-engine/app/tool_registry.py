@@ -144,9 +144,9 @@ _READ_SCHEMA = {
         "name": "read_file",
         "description": (
             "Read the contents of a specific file. "
-            "Use this after scan_directory or find_in_code to inspect a file you've identified as relevant. "
+            "Call this directly when the task provides an exact repository-relative file path. "
+            "Otherwise use scan_directory or find_in_code first to identify the file. "
             "Output is truncated if the file is large — use offset and limit to page through it. "
-            "Always call scan_directory or find_in_code first so you know the file exists. "
             "Path must use 'owner/repo/path/to/file.ext' format."
         ),
         "parameters": {

@@ -1,203 +1,273 @@
-"""
-Tests for mcp_server.py — MCP JSON-RPC 2.0 protocol adapter.
+"""Tests for the thin MCP-to-REST context-engine adapter."""
 
-Tests the dispatch logic (handle()) without touching the filesystem or network.
-"""
-
-import sys
+import importlib.util
+import json
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'context-engine'))
-
+import httpx
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# mcp_server is a standalone script — import it directly
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'context-engine'))
-import importlib.util
 
 _spec = importlib.util.spec_from_file_location(
     "mcp_server",
-    os.path.join(os.path.dirname(__file__), '..', 'context-engine', 'mcp_server.py'),
+    os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "context-engine",
+        "mcp_server.py",
+    ),
 )
 mcp = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(mcp)
 
 
-# ── handle() dispatch ──────────────────────────────────────────────────────────
-
 @pytest.mark.asyncio
-async def test_initialize_returns_protocol_version():
-    msg = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
-    response = await mcp.handle(msg, [])
-    assert response["id"] == 1
+async def test_initialize_prioritizes_delegation():
+    response = await mcp.handle(
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+    )
+
     result = response["result"]
     assert result["protocolVersion"] == mcp.PROTOCOL_VERSION
-    assert "capabilities" in result
-    assert "serverInfo" in result
+    assert result["serverInfo"]["name"] == "context-engine"
+    assert "Prefer investigate_codebase" in result["instructions"]
 
 
 @pytest.mark.asyncio
-async def test_ping_returns_empty_result():
-    msg = {"jsonrpc": "2.0", "id": 2, "method": "ping", "params": {}}
-    response = await mcp.handle(msg, [])
-    assert response["id"] == 2
-    assert response["result"] == {}
+async def test_tools_list_has_primary_tools_first_and_advanced_tools_last():
+    response = await mcp.handle(
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+    )
+
+    tools = response["result"]["tools"]
+    names = [tool["name"] for tool in tools]
+    assert names[:4] == [
+        "investigate_codebase",
+        "load_context",
+        "review_diff",
+        "audit_issue",
+    ]
+    assert names[4:] == [
+        "scan_directory",
+        "find_in_code",
+        "summarize_file",
+        "dependency_analysis",
+        "vector_search",
+    ]
+    assert "PRIMARY DELEGATION TOOL" in tools[0]["description"]
+    assert all(tool["inputSchema"]["additionalProperties"] is False for tool in tools)
 
 
 @pytest.mark.asyncio
-async def test_tools_list_refreshes_cache_and_returns_tools():
-    fake_tools = [{"name": "scan_directory", "description": "scan", "inputSchema": {}}]
+async def test_investigate_codebase_starts_and_polls_agent_run():
+    responses = [
+        {"run_id": "run-1", "status": "running"},
+        {
+            "run_id": "run-1",
+            "status": "complete",
+            "final_answer": "All agent endpoints are protected.",
+            "tool_calls_made": [{"name": "grep"}],
+            "verification": {"passed": True},
+            "iterations": 3,
+            "plan_state": {"goal": "Inspect auth"},
+        },
+    ]
 
-    with patch.object(mcp, "_fetch_tools", new_callable=AsyncMock, return_value=fake_tools):
-        tools_cache = []
-        msg = {"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}}
-        response = await mcp.handle(msg, tools_cache)
+    with (
+        patch.object(
+            mcp, "_request_json", new_callable=AsyncMock, side_effect=responses
+        ) as request,
+        patch.object(mcp.asyncio, "sleep", new_callable=AsyncMock),
+    ):
+        result = await mcp._call_tool(
+            "investigate_codebase",
+            {"task": "Determine whether auth protects all agent endpoints"},
+        )
 
-    assert response["id"] == 3
-    assert response["result"]["tools"] == fake_tools
-    assert tools_cache == fake_tools  # cache was updated in place
+    assert result["verification"]["passed"] is True
+    assert result["tool_calls_made"] == [{"name": "grep"}]
+    assert request.await_args_list[0].args == ("POST", "/agents/run")
+    assert request.await_args_list[1].args == (
+        "GET",
+        "/agents/run/status/run-1",
+    )
 
 
 @pytest.mark.asyncio
-async def test_tools_call_success():
-    with patch.object(mcp, "_call_tool", new_callable=AsyncMock, return_value="health: ok"):
-        msg = {
-            "jsonrpc": "2.0",
-            "id": 4,
-            "method": "tools/call",
-            "params": {"name": "health_check", "arguments": {}},
-        }
-        response = await mcp.handle(msg, [])
+async def test_audit_issue_starts_and_polls_auditor():
+    responses = [
+        {"run_id": "audit-1", "status": "running"},
+        {"run_id": "audit-1", "status": "complete", "findings": [{"issue": 42}]},
+    ]
 
-    assert response["id"] == 4
+    with (
+        patch.object(
+            mcp, "_request_json", new_callable=AsyncMock, side_effect=responses
+        ) as request,
+        patch.object(mcp.asyncio, "sleep", new_callable=AsyncMock),
+    ):
+        result = await mcp._call_tool(
+            "audit_issue",
+            {
+                "task": "Audit issue 42",
+                "repo": "ryemyster/context-manager",
+                "paths": ["context-engine/app"],
+            },
+        )
+
+    assert result["findings"] == [{"issue": 42}]
+    assert request.await_args_list[0].args == (
+        "POST",
+        "/agents/issue-auditor/run",
+    )
+    assert request.await_args_list[1].args == (
+        "GET",
+        "/agents/issue-auditor/status/audit-1",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool", "endpoint"),
+    [
+        ("load_context", "/context"),
+        ("review_diff", "/diff-summary"),
+        ("scan_directory", "/scan"),
+        ("find_in_code", "/find"),
+        ("summarize_file", "/summarize"),
+        ("dependency_analysis", "/dependencies"),
+        ("vector_search", "/vector-search"),
+    ],
+)
+async def test_sync_tools_route_to_existing_rest_endpoints(tool, endpoint):
+    with patch.object(
+        mcp,
+        "_request_json",
+        new_callable=AsyncMock,
+        return_value={"ok": True},
+    ) as request:
+        result = await mcp._call_tool(tool, {"value": "unchanged"})
+
+    assert result == {"ok": True}
+    request.assert_awaited_once_with(
+        "POST",
+        endpoint,
+        payload={"value": "unchanged"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_tools_call_returns_json_text_content():
+    payload = {
+        "final_answer": "Evidence-based answer",
+        "tool_calls_made": [],
+        "verification": {"passed": True},
+        "iterations": 1,
+        "plan_state": {},
+    }
+    with patch.object(
+        mcp, "_call_tool", new_callable=AsyncMock, return_value=payload
+    ):
+        response = await mcp.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "investigate_codebase",
+                    "arguments": {"task": "Investigate"},
+                },
+            }
+        )
+
     result = response["result"]
-    assert result["content"][0]["type"] == "text"
-    assert result["content"][0]["text"] == "health: ok"
     assert result["isError"] is False
+    assert json.loads(result["content"][0]["text"]) == payload
 
 
 @pytest.mark.asyncio
-async def test_tools_call_error_result_sets_is_error():
-    with patch.object(mcp, "_call_tool", new_callable=AsyncMock, return_value="[error: engine down]"):
-        msg = {
+async def test_tools_call_adapter_error_sets_is_error():
+    with patch.object(
+        mcp,
+        "_call_tool",
+        new_callable=AsyncMock,
+        side_effect=mcp.AdapterError("engine unavailable"),
+    ):
+        response = await mcp.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {"name": "load_context", "arguments": {"task": "x"}},
+            }
+        )
+
+    assert response["result"]["isError"] is True
+    assert response["result"]["content"][0]["text"] == "engine unavailable"
+
+
+@pytest.mark.asyncio
+async def test_tools_call_rejects_unknown_tool():
+    response = await mcp.handle(
+        {
             "jsonrpc": "2.0",
             "id": 5,
             "method": "tools/call",
-            "params": {"name": "health_check", "arguments": {}},
+            "params": {"name": "read_file", "arguments": {}},
         }
-        response = await mcp.handle(msg, [])
+    )
 
-    assert response["result"]["isError"] is True
-
-
-@pytest.mark.asyncio
-async def test_tools_call_missing_name_returns_error():
-    msg = {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {}}
-    response = await mcp.handle(msg, [])
-    assert "error" in response
     assert response["error"]["code"] == -32602
+    assert "unknown tool" in response["error"]["message"]
 
 
 @pytest.mark.asyncio
-async def test_unknown_method_returns_method_not_found():
-    msg = {"jsonrpc": "2.0", "id": 7, "method": "unknown/method", "params": {}}
-    response = await mcp.handle(msg, [])
-    assert "error" in response
-    assert response["error"]["code"] == -32601
-    assert "unknown/method" in response["error"]["message"]
+async def test_request_json_uses_api_key_and_returns_dict():
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = {"ok": True}
+
+    with (
+        patch.object(mcp, "ENGINE_API_KEY", "secret"),
+        patch("httpx.AsyncClient") as client_cls,
+    ):
+        client = AsyncMock()
+        client.request.return_value = response
+        client_cls.return_value.__aenter__.return_value = client
+
+        result = await mcp._request_json("POST", "/context", payload={"task": "x"})
+
+    assert result == {"ok": True}
+    assert client_cls.call_args.kwargs["headers"]["X-API-Key"] == "secret"
+    client.request.assert_awaited_once_with(
+        "POST",
+        "/context",
+        json={"task": "x"},
+    )
 
 
 @pytest.mark.asyncio
-async def test_notification_returns_none():
-    """Messages without 'id' are notifications — no response."""
-    msg = {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}
-    response = await mcp.handle(msg, [])
-    assert response is None
+async def test_request_json_converts_http_error_to_adapter_error():
+    with patch("httpx.AsyncClient") as client_cls:
+        client = AsyncMock()
+        client.request.side_effect = httpx.ConnectError("refused")
+        client_cls.return_value.__aenter__.return_value = client
 
-
-# ── _fetch_tools ───────────────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_fetch_tools_converts_to_mcp_format():
-    """_fetch_tools converts function-call schema format to MCP inputSchema format."""
-    engine_response = {
-        "tools": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "scan_directory",
-                    "description": "List files",
-                    "parameters": {"type": "object", "properties": {"path": {"type": "string"}}},
-                },
-            }
-        ]
-    }
-
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = engine_response  # json() is sync in httpx
-
-    import httpx
-    with patch("httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_resp
-        mock_client_cls.return_value.__aenter__.return_value = mock_client
-
-        tools = await mcp._fetch_tools()
-
-    assert len(tools) == 1
-    t = tools[0]
-    assert t["name"] == "scan_directory"
-    assert t["description"] == "List files"
-    assert "inputSchema" in t
-    assert "parameters" not in t  # should use inputSchema, not parameters
+        with pytest.raises(mcp.AdapterError, match="unreachable"):
+            await mcp._request_json("GET", "/healthcheck")
 
 
 @pytest.mark.asyncio
-async def test_fetch_tools_returns_empty_on_engine_down():
-    """Falls back to empty list if the engine is unavailable."""
-    import httpx
+async def test_ping_notification_and_unknown_method():
+    ping = await mcp.handle({"jsonrpc": "2.0", "id": 6, "method": "ping"})
+    notification = await mcp.handle(
+        {"jsonrpc": "2.0", "method": "notifications/initialized"}
+    )
+    unknown = await mcp.handle(
+        {"jsonrpc": "2.0", "id": 7, "method": "unknown/method"}
+    )
 
-    with patch("httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.get.side_effect = httpx.ConnectError("refused")
-        mock_client_cls.return_value.__aenter__.return_value = mock_client
-
-        tools = await mcp._fetch_tools()
-
-    assert tools == []
-
-
-# ── _call_tool ─────────────────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_call_tool_returns_result_string():
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"name": "health_check", "result": "health: ok"}
-
-    import httpx
-    with patch("httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_resp
-        mock_client_cls.return_value.__aenter__.return_value = mock_client
-
-        result = await mcp._call_tool("health_check", {})
-
-    assert result == "health: ok"
-
-
-@pytest.mark.asyncio
-async def test_call_tool_timeout_returns_error_string():
-    import httpx
-
-    with patch("httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.post.side_effect = httpx.TimeoutException("timed out")
-        mock_client_cls.return_value.__aenter__.return_value = mock_client
-
-        result = await mcp._call_tool("slow_tool", {})
-
-    assert "[error:" in result
-    assert "timed out" in result or "slow_tool" in result
+    assert ping["result"] == {}
+    assert notification is None
+    assert unknown["error"]["code"] == -32601

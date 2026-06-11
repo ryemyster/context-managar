@@ -28,7 +28,7 @@ This repo implements a real but narrow read-only repository-analysis agent loop 
 ```mermaid
 flowchart TD
   C[Client: REST, scripts, MCP editor] --> API[FastAPI app main.py]
-  MCP[MCP stdio adapter] --> API
+  MCP[Persistent MCP HTTP service :8089/mcp] --> API
 
   API --> DET[Deterministic endpoints: scan/find/context/diff/draft/scaffold]
   DET --> O1[Ollama generate/reason/embed]
@@ -62,7 +62,7 @@ flowchart TD
 | Tool | Tool | Present | `context-engine/app/tool_registry.py:268` | Registry maps tool names to schemas and executors. |
 | Tool | Query Tool | Present | `context-engine/app/tool_registry.py:175`, `context-engine/app/tool_registry.py:191`, `context-engine/app/tool_registry.py:208`, `context-engine/app/tool_registry.py:230` | Tools are read-only repo inspection/search tools. |
 | Tool | Command Tool | Partial | `context-engine/app/main.py:1175`, `context-engine/app/supabase_vector.py:126` | Indexing and artifact upserts mutate storage, but model-callable tools do not expose mutations. |
-| Tool | Discovery Tool | Present | `context-engine/app/main.py:1421`, `context-engine/mcp_server.py:119` | `/agents/tools` and MCP `tools/list` reveal available schemas. |
+| Tool | Discovery Tool | Present | `context-engine/app/main.py`, `context-engine/mcp_server.py` | `/agents/tools` reveals internal junior tools; MCP `tools/list` reveals the high-level delegation surface first and advanced direct tools second. |
 | Tool Interface | Tool Description | Present | `context-engine/app/tool_registry.py:46`, `context-engine/app/tool_registry.py:71`, `context-engine/app/tool_registry.py:101` | Descriptions include when to call and expected result. |
 | Tool Interface | Constrained Input | Partial | `context-engine/app/tool_registry.py:54`, `context-engine/app/models.py:198` | JSON schemas and Pydantic models exist, but few enums/ranges and limited validation. |
 | Tool Interface | Smart Defaults | Present | `context-engine/app/tool_registry.py:193`, `context-engine/app/models.py:200` | Optional path defaults and empty tools list enables all tools. |
@@ -71,18 +71,18 @@ flowchart TD
 | Tool Interface | Performance Hint | Present | `context-engine/app/tool_registry.py:48`, `context-engine/app/tool_registry.py:75`, `context-engine/app/tool_registry.py:136` | Descriptions guide efficient scan/find/grep use. |
 | Tool Interface | Parameter Coercion | Present | `context-engine/app/agent_runner.py:39`, `tests/test_agent_runner.py:168` | JSON-string tool arguments are normalized. |
 | Tool Discovery | Tool Registry | Present | `context-engine/app/tool_registry.py:268`, `context-engine/app/tool_registry.py:279` | Central registry returns tool definitions. |
-| Tool Discovery | Schema Explorer | Partial | `context-engine/mcp_server.py:58`, `context-engine/mcp_server.py:119` | Tool schemas can be listed, but no layered drill-down beyond the manifest. |
+| Tool Discovery | Schema Explorer | Partial | `context-engine/mcp_server.py` | MCP exposes explicit high-level delegation schemas plus clearly marked advanced direct schemas, but no separate schema drill-down API. |
 | Tool Discovery | Dependency Hint | Present | `context-engine/app/tool_registry.py:47`, `context-engine/app/tool_registry.py:103` | Tool descriptions recommend call order. |
 | Tool Discovery | Capability Matching | Partial | `context-engine/app/tool_registry.py:279` | Callers may request a subset by exact tool name; no intent-based matching. |
 | Tool Discovery | Health Check | Present | `context-engine/app/tool_registry.py:156`, `context-engine/app/main.py:164` | Health endpoint and model-callable health tool exist. |
-| Tool Composition | Abstraction Ladder | Present | `context-engine/app/main.py:856`, `context-engine/app/main.py:1130`, `context-engine/app/main.py:1175`, `context-engine/app/tool_registry.py:175` | Low-level scan/find/read plus higher-level `/context` and `/index`. |
+| Tool Composition | Abstraction Ladder | Present | `context-engine/mcp_server.py`, `context-engine/app/main.py`, `context-engine/app/tool_registry.py` | MCP leads with agent delegation and context/diff/issue workflows, while advanced direct retrieval and internal agent tools remain available at lower layers. |
 | Tool Composition | Task Bundle | Present | `context-engine/app/context_builder.py:137`, `context-engine/app/main.py:1326` | `/context` and `/scaffold` bundle multi-step work. |
 | Tool Composition | Batch Operation | Present | `context-engine/app/main.py:1203`, `context-engine/app/main.py:1357` | Index and scaffold loop over multiple paths/files. |
 | Tool Composition | Operation Mode | Partial | `context-engine/app/models.py:58`, `context-engine/app/models.py:64` | Draft/scaffold support create/edit modes without enum enforcement. |
 | Tool Composition | Tool Chain | Present | `context-engine/app/agent_runner.py:91`, `context-engine/app/agent_runner.py:122` | Agent chains model-selected tool calls. |
 | Tool Composition | Scatter-Gather Tool | Partial | `context-engine/app/context_builder.py:145`, `context-engine/app/context_builder.py:170`, `context-engine/app/context_builder.py:202` | Gathers path scans, grep, and optional vector hits into one context bundle. |
 | Tool Execution | Synchronous Execution | Present | `context-engine/app/main.py:1408`, `context-engine/app/tool_registry.py:285` | Direct tool calls are request/response. |
-| Tool Execution | Async Job | Present | `context-engine/app/main.py:1502`, `context-engine/app/main.py:1537` | Agent and issue-auditor runs return run IDs and polling endpoints. |
+| Tool Execution | Async Job | Present | `context-engine/app/main.py`, `context-engine/mcp_server.py` | REST agent and issue-auditor runs retain run IDs; the MCP adapter polls them and returns one completed tool result. |
 | Tool Execution | Idempotent Operation | Partial | `context-engine/app/supabase_vector.py:88`, `context-engine/app/supabase_vector.py:92`, `context-engine/app/supabase_vector.py:134` | Chunk hashes and merge-duplicates make vector indexing partly retry-safe. |
 | Tool Execution | Transactional Boundary | Absent |  | Multi-step artifact/vector writes are not all-or-nothing. |
 | Tool Execution | Compensation Handler | Absent |  | No undo/rollback handlers found. |
@@ -107,9 +107,9 @@ flowchart TD
 | Tool Security | Permission Gate | Present | `context-engine/app/main.py:73`, `context-engine/app/repo_reader.py:14` | Optional API key and path traversal guard. |
 | Tool Security | Scope Declaration | Present | `context-engine/app/tool_registry.py:49`, `context-engine/app/tool_registry.py:444` | `ToolMeta.scopes` declares per-tool capability requirements; `execute_tool()` enforces `allowed_scopes` and returns `scope_denied` ToolResult when not met. |
 | Tool Security | Audit Trail | Present | `context-engine/app/artifact_store.py:70`, `context-engine/app/logger.py`, `context-engine/app/agent_runner.py:127` | Event log, request IDs, and tool-call traces are stored/logged. |
-| Compositional | Tool Gateway | Present | `context-engine/mcp_server.py:3`, `context-engine/app/main.py:1408` | REST and MCP expose a unified facade over tool backends. |
-| Compositional | Tool Adapter | Present | `context-engine/mcp_server.py:58`, `context-engine/mcp_server.py:80` | MCP adapter wraps REST tools for editors. |
-| Compositional | Canonical Tool Model | Partial | `context-engine/app/tool_registry.py:40`, `context-engine/mcp_server.py:67` | OpenAI/Ollama-like schemas are converted to MCP; no versioned shared contract object. |
+| Compositional | Tool Gateway | Present | `context-engine/mcp_server.py`, `context-engine/app/main.py` | MCP exposes high-level delegation while REST remains the stable application contract. |
+| Compositional | Tool Adapter | Present | `context-engine/mcp_server.py`, `context-engine/mcp_http_server.py` | The persistent HTTP service performs only MCP transport; the shared adapter handles endpoint mapping, polling, auth forwarding, and response shaping. |
+| Compositional | Canonical Tool Model | Partial | `context-engine/mcp_server.py`, `context-engine/app/models.py` | Explicit MCP schemas map directly to existing Pydantic-backed REST contracts, but schema definitions are not generated from one versioned contract. |
 | Compositional | Tool Versioning | Absent |  | No coexistence of multiple tool versions found. |
 
 Collapsed absent patterns: Mutual Exclusivity, Transactional Boundary, Compensation Handler, GUI URL, Tool Versioning.
@@ -152,7 +152,7 @@ Agentic workflow with genuine observe/evaluate/repair loop — significantly abo
 - `run_agent()` represents the user task as a message history, gives the model available tool definitions, and lets the model decide whether to call tools or answer (`context-engine/app/agent_runner.py:79`, `context-engine/app/agent_runner.py:102`, `context-engine/app/agent_runner.py:115`).
 - Tool results are observed by the model in later iterations through appended `tool` messages (`context-engine/app/agent_runner.py:122`, `context-engine/app/agent_runner.py:135`).
 - The loop has autonomous continuation with iteration and wall-clock stopping conditions (`context-engine/app/agent_runner.py:91`, `context-engine/app/agent_runner.py:95`, `context-engine/app/config.py:23`).
-- Tool schemas are exposed both to the internal Ollama chat API and external MCP clients (`context-engine/app/tool_registry.py:42`, `context-engine/app/main.py:1421`, `context-engine/mcp_server.py:119`).
+- Internal repository tools are exposed to Ollama through `tool_registry.py`; external MCP clients receive a separate high-level delegation surface whose primary tool invokes the complete agent loop.
 - Agent runs persist full run metadata and tool-call traces as JSON/Markdown artifacts (`context-engine/app/main.py:1440`, `context-engine/app/main.py:1464`, `context-engine/app/artifact_store.py:89`).
 
 ## What Makes It A Wrapper
@@ -205,6 +205,6 @@ This should not be pushed toward a broad mutation-capable autonomous agent yet. 
 3. ~~Add tool scope metadata and enforce in `execute_tool()`~~ — **Done.** `ToolMeta.scopes` + `allowed_scopes` enforcement; `scope_denied` error type.
 4. ~~Add a post-hoc answer verifier to check final answer coherence against tool evidence~~ — **Done.** `_verify_answer()` in `agent_runner.py`; `verification` field on `AgentResult` and `AgentRunResponse`.
 5. ~~Add confirmation or clarification behavior for ambiguous paths, broad searches, and uncertain matches~~ — **Done.** `needs_confirmation` error type with `candidates` in `scan_directory` and `read_file`; repair pass re-runs the loop on failed verification.
-6. Version tool schemas before external MCP/editor clients depend on them heavily.
+6. Version MCP tool schemas before making breaking changes; keep current names as compatibility aliases.
 
 The architecture becomes materially riskier if model-selected tools are allowed to write files, run shell commands, or mutate external systems before permission gates, confirmations, transactional boundaries, compensation behavior, and audit controls are implemented.

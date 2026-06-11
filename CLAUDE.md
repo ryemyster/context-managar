@@ -6,6 +6,9 @@ This IS the context engine. Changes here affect every project that uses it as a 
 
 ```
 context-engine/
+  mcp_server.py        — shared thin MCP → REST adapter; no agent business logic
+  mcp_http_server.py   — persistent Streamable HTTP transport on :8089/mcp
+  requirements-mcp.txt — isolated MCP service dependencies
   app/
     main.py            — all routes + /setup doc (update /setup when adding endpoints)
     config.py          — env vars and constants — single source of truth
@@ -26,6 +29,9 @@ context-engine/
 .env.example           — template for all configurable vars
 supabase/migrations/   — SQL applied via db query --linked (not db push)
 scripts/               — shell wrappers for each endpoint
+  install-mcp.sh       — install/restart the MCP launchd service
+config/                — Claude Code and Codex MCP configuration examples
+docs/mcp-integration.md — MCP tools, installation, examples, and curl migration
 ```
 
 ## Three-model stack
@@ -33,6 +39,8 @@ scripts/               — shell wrappers for each endpoint
 | Model | Env var | Used by |
 |-------|---------|---------|
 | `qwen3.5:9b` | `OLLAMA_REASON_MODEL` | `/diff-summary` |
+| `qwen2.5-coder:3b` | `OLLAMA_AGENT_MODEL` | `/agents/run` answer generation |
+| `qwen2.5-coder:3b` | `OLLAMA_AGENT_SELECT_MODEL` / `OLLAMA_AGENT_VERIFY_MODEL` | `/agents/run` structured selection and verification |
 | `qwen2.5-coder:3b` | `OLLAMA_MODEL` | `/context`, `/draft`, `/scaffold`, `/scan`, `/find`, `/summarize` |
 | `nomic-embed-text` | `OLLAMA_EMBED_MODEL` | `/index`, `/vector-search`, `/context` (vector step) |
 
@@ -42,6 +50,9 @@ scripts/               — shell wrappers for each endpoint
 
 Native Python/uvicorn process — no Docker. Plist:
 `~/Library/LaunchAgents/life.ascendvent.context-manager.plist`
+
+The MCP transport is a separate service:
+`~/Library/LaunchAgents/life.ascendvent.context-engine-mcp.plist`
 
 Auto-starts on login, restarts on crash (KeepAlive=true).
 
@@ -54,6 +65,9 @@ launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
 
 # Start
 launchctl load ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+
+# Install/restart MCP transport
+bash scripts/install-mcp.sh
 ```
 
 ## Logs
@@ -262,6 +276,21 @@ Use the `/endpoint` agent to scaffold the pattern.
 Path prefix: `ryemyster/context-manager`
 App source: `ryemyster/context-manager/context-engine/app`
 
+Use the `context-engine` MCP server for normal agent interaction:
+
+```text
+investigate_codebase(
+  task="Read-only investigation for ryemyster/context-manager. Return evidence files, conclusions, and verification."
+)
+```
+
+`investigate_codebase` is the primary workflow. It delegates to the existing
+Context Engine Agent, which owns planning, scans, reads, memory, verification,
+and repair passes. Do not replace delegation with a caller-managed chain of
+advanced MCP tools.
+
+REST remains available for compatibility and troubleshooting:
+
 ```bash
 curl -s -X POST http://localhost:8088/context \
   -H "Content-Type: application/json" \
@@ -274,4 +303,7 @@ curl -s -X POST http://localhost:8088/context \
 - Never write to the repo — the engine is read-only on `REPO_ROOT`
 - `config.py` is the single source of truth for all env vars — never `os.getenv()` outside it
 - Always update `/setup` when adding or changing an endpoint — it's the agent contract
+- Keep `mcp_server.py` transport-only; it may map, poll, and shape REST responses but must not duplicate agent logic
+- Keep `mcp_http_server.py` as a persistent transport wrapper over `mcp_server.py`
+- Put primary delegation tools before advanced direct tools and keep descriptions explicit about preferring `investigate_codebase`
 - `CONTEXT_ENGINE_API_KEY` in `config.py` — empty = local dev bypass, non-empty = enforced; health endpoints always exempt

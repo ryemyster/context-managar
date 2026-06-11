@@ -9,22 +9,23 @@ No FastAPI dependency — pure async Python. Import and await run_agent().
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from . import config
 from . import ollama_client, tool_registry
 from .logger import log
 
-_DEFAULT_SYSTEM_PROMPT = (
-    "You are a code analysis agent with tools to explore a software repository. "
-    "Use tools to gather real evidence before drawing conclusions — do not guess. "
-    "Recommended call order: search_memory (check prior runs first) → update_plan (record your plan) "
-    "→ scan_directory → find_in_code or grep → read_file. "
-    "Always call search_memory first — if a similar task was run before, use those results as a starting point. "
-    "After search_memory, call update_plan to record your goal and steps before exploring. "
-    "When you have enough evidence, provide a final answer without calling more tools. "
+_BASE_SYSTEM_PROMPT = (
+    "You are a read-only code analysis agent. Use the enabled tools to gather "
+    "real repository evidence before drawing conclusions. Never claim that you "
+    "called a tool unless the runtime returned its result. Invoke tools through "
+    "the native tool-call interface; do not describe a future call or print a "
+    "JSON/XML imitation of one. You may provide a final answer only after at "
+    "least one enabled tool has returned evidence. "
     f"Repository root: {config.REPO_ROOT}"
 )
 
@@ -56,6 +57,20 @@ def _coerce_arguments(raw) -> dict:
     return {}
 
 
+def _normalize_tool_arguments(arguments: dict) -> dict:
+    """Convert model-produced absolute repo paths to the public relative contract."""
+    normalized = dict(arguments)
+    for key in ("file", "path"):
+        value = normalized.get(key)
+        if not isinstance(value, str) or not value.startswith("/"):
+            continue
+        try:
+            normalized[key] = str(Path(value).resolve().relative_to(config.REPO_ROOT))
+        except ValueError:
+            pass
+    return normalized
+
+
 def _serialize_tool_result(result: tool_registry.ToolResult) -> str:
     """Convert a ToolResult into the string that goes into the model's message history."""
     if result.ok:
@@ -66,6 +81,82 @@ def _serialize_tool_result(result: tool_registry.ToolResult) -> str:
     if result.candidates:
         parts.append(f"Candidates: {', '.join(result.candidates[:5])}")
     return " ".join(parts)
+
+
+def _tool_names(tool_defs: list[dict]) -> list[str]:
+    return [
+        schema.get("function", {}).get("name", "")
+        for schema in tool_defs
+        if schema.get("function", {}).get("name")
+    ]
+
+
+def _build_system_prompt(tool_defs: list[dict], custom_prompt: str | None = None) -> str:
+    """Build instructions that never reference tools excluded from this run."""
+    names = _tool_names(tool_defs)
+    parts = [custom_prompt.strip() if custom_prompt else _BASE_SYSTEM_PROMPT]
+    parts.append(f"Enabled tools: {', '.join(names) if names else '(none)'}.")
+
+    order = [
+        name for name in (
+            "search_memory",
+            "update_plan",
+            "scan_directory",
+            "find_in_code",
+            "grep",
+            "read_file",
+        )
+        if name in names
+    ]
+    if order:
+        parts.append(
+            "Use only enabled tools. Suggested order when relevant: "
+            + " -> ".join(order)
+            + "."
+        )
+    if "read_file" in names:
+        parts.append(
+            "When the task supplies an exact repository-relative file path, "
+            "call read_file directly; discovery is unnecessary."
+        )
+    if "update_plan" in names:
+        parts.append(
+            "Record a concise plan with update_plan before repository exploration."
+        )
+    return " ".join(parts)
+
+
+def _recover_text_tool_calls(content: str, allowed_names: set[str]) -> list[dict]:
+    """Recover valid enabled tool calls when a model prints JSON instead of native calls."""
+    if not content or not allowed_names:
+        return []
+
+    decoder = json.JSONDecoder()
+    parsed_objects: list[dict] = []
+    for index, char in enumerate(content):
+        if char != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(content[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            parsed_objects.append(value)
+
+    recovered: list[dict] = []
+    for value in parsed_objects:
+        candidates = value.get("tool_calls") if isinstance(value.get("tool_calls"), list) else [value]
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            function = candidate.get("function") if isinstance(candidate.get("function"), dict) else candidate
+            name = function.get("name")
+            arguments = _coerce_arguments(function.get("arguments", {}))
+            if name in allowed_names:
+                recovered.append({"function": {"name": name, "arguments": arguments}})
+        if recovered:
+            break
+    return recovered
 
 
 async def run_agent(
@@ -87,7 +178,7 @@ async def run_agent(
         tools:          Tool names to enable (None = all tools).
         system_prompt:  Override the default system prompt.
         max_iterations: Max think→act cycles (default: AGENT_MAX_ITERATIONS).
-        model:          Ollama model name override (default: OLLAMA_REASON_MODEL).
+        model:          Ollama model name override (default: OLLAMA_AGENT_MODEL).
         allowed_scopes: Scope whitelist enforced on every tool call (None = all scopes).
 
     Returns AgentResult with final_answer, iteration count, full tool call trace, and plan_state.
@@ -99,7 +190,7 @@ async def run_agent(
         if unknown:
             raise ValueError(f"unknown tools: {unknown}. Available: {tool_registry.ALL_TOOLS}")
     tool_defs = tool_registry.get_tool_definitions(tools)
-    system    = system_prompt or _DEFAULT_SYSTEM_PROMPT
+    system    = _build_system_prompt(tool_defs, system_prompt)
 
     messages: list[dict] = [
         {"role": "system", "content": system},
@@ -112,7 +203,16 @@ async def run_agent(
     memory_hits = 0
     _search_memory_allowed = tools is None or "search_memory" in tools
     if _search_memory_allowed:
-        memory_ctx = await _preflight_memory(task, allowed_scopes=allowed_scopes)
+        try:
+            memory_ctx = await asyncio.wait_for(
+                _preflight_memory(task, allowed_scopes=allowed_scopes),
+                timeout=config.OLLAMA_AGENT_MEMORY_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            log.warning(
+                "agent_runner preflight_memory timeout limit=%.1fs",
+                config.OLLAMA_AGENT_MEMORY_TIMEOUT,
+            )
         if memory_ctx:
             memory_hits = memory_ctx.count("---") + 1
             messages[1]["content"] = task + "\n\n" + memory_ctx
@@ -200,8 +300,94 @@ async def _execute_loop(
             final_answer = _last_assistant_content(messages) or "[agent stopped: time budget exceeded]"
             break
 
-        log.debug("agent_runner iter=%d elapsed=%.1fs messages=%d", i + 1, elapsed, len(messages))
-        message = await ollama_client.chat_with_tools(messages, tool_defs, model=model)
+        remaining = budget - elapsed
+        call_timeout = min(config.OLLAMA_AGENT_CALL_TIMEOUT, remaining)
+
+        has_tool_evidence = any(msg.get("role") == "tool" for msg in messages)
+        if tool_defs:
+            selection_timeout = min(config.OLLAMA_AGENT_SELECT_TIMEOUT, remaining)
+            selected = await ollama_client.select_tool_call(
+                messages,
+                tool_defs,
+                timeout=selection_timeout,
+            )
+            if selected.get("final_answer"):
+                message = {
+                    "role": "assistant",
+                    "content": selected["final_answer"],
+                    "tool_calls": [],
+                }
+                log.info("agent_runner structured final answer iter=%d", i + 1)
+            elif "error" not in selected:
+                selected_fn = selected.get("function", {})
+                selected_name = selected_fn.get("name", "")
+                selected_arguments = _normalize_tool_arguments(
+                    _coerce_arguments(selected_fn.get("arguments", {}))
+                )
+                duplicate = any(
+                    call.get("name") == selected_name
+                    and call.get("arguments") == selected_arguments
+                    and not str(call.get("result", "")).startswith("[")
+                    for call in tool_calls_made
+                )
+                if duplicate:
+                    synthesized = await ollama_client.answer_from_evidence(
+                        messages,
+                        model=model,
+                        timeout=selection_timeout,
+                    )
+                    if synthesized.get("final_answer"):
+                        message = {
+                            "role": "assistant",
+                            "content": synthesized["final_answer"],
+                            "tool_calls": [],
+                        }
+                        log.info(
+                            "agent_runner synthesized answer after duplicate tool iter=%d tool=%s",
+                            i + 1,
+                            selected_name,
+                        )
+                    else:
+                        message = {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [selected],
+                        }
+                else:
+                    message = {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [selected],
+                    }
+                log.info(
+                    "agent_runner structured tool selection iter=%d tool=%s",
+                    i + 1,
+                    selected_name,
+                )
+            else:
+                log.warning(
+                    "agent_runner primary tool selection failed iter=%d error=%s",
+                    i + 1,
+                    selected["error"],
+                )
+                message = await ollama_client.chat_with_tools(
+                    messages,
+                    tool_defs,
+                    model=model,
+                    timeout=call_timeout,
+                )
+        else:
+            message = await ollama_client.chat_with_tools(
+                messages,
+                tool_defs,
+                model=model,
+                timeout=call_timeout,
+            )
+
+        log.debug(
+            "agent_runner iter=%d elapsed=%.1fs messages=%d model_timeout=%.1fs",
+            i + 1, elapsed, len(messages), call_timeout,
+        )
 
         if "error" in message:
             log.error("agent_runner model error iter=%d: %s", i + 1, message["error"])
@@ -209,12 +395,64 @@ async def _execute_loop(
             final_answer = f"[agent stopped: {message['error']}]"
             break
 
+        tool_calls = message.get("tool_calls") or []
+        if not tool_calls:
+            tool_calls = _recover_text_tool_calls(
+                message.get("content") or "",
+                set(_tool_names(tool_defs)),
+            )
+            if tool_calls:
+                log.warning(
+                    "agent_runner recovered %d text-encoded tool call(s) iter=%d",
+                    len(tool_calls),
+                    i + 1,
+                )
+                message = {**message, "tool_calls": tool_calls}
+
+        if not tool_calls and tool_defs and not has_tool_evidence:
+            fallback_remaining = budget - (time.monotonic() - t_start)
+            fallback_timeout = min(config.OLLAMA_AGENT_SELECT_TIMEOUT, fallback_remaining)
+            if fallback_timeout > 0:
+                selected = await ollama_client.select_tool_call(
+                    messages,
+                    tool_defs,
+                    model=model,
+                    timeout=fallback_timeout,
+                )
+                if "error" not in selected:
+                    tool_calls = [selected]
+                    message = {**message, "tool_calls": tool_calls}
+                    log.warning(
+                        "agent_runner used structured tool selection iter=%d tool=%s",
+                        i + 1,
+                        selected.get("function", {}).get("name"),
+                    )
+                else:
+                    log.warning(
+                        "agent_runner structured tool selection failed iter=%d error=%s",
+                        i + 1,
+                        selected["error"],
+                    )
+
         assistant_msg = dict(message)
         assistant_msg.setdefault("role", "assistant")
         messages.append(assistant_msg)
 
-        tool_calls = message.get("tool_calls") or []
         if not tool_calls:
+            if tool_defs and not has_tool_evidence:
+                log.warning(
+                    "agent_runner rejected unsupported final answer iter=%d",
+                    i + 1,
+                )
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "No tool has returned evidence yet. Call one of the enabled "
+                        "tools now through the native tool-call interface. Do not "
+                        "explain or print the call as text."
+                    ),
+                })
+                continue
             final_answer = (message.get("content") or "").strip()
             stopped_reason = "final_answer"
             log.info("agent_runner final_answer iter=%d dur=%.1fs", i + 1, time.monotonic() - t_start)
@@ -223,7 +461,9 @@ async def _execute_loop(
         for tc in tool_calls:
             fn        = tc.get("function", {})
             name      = fn.get("name", "")
-            arguments = _coerce_arguments(fn.get("arguments", {}))
+            arguments = _normalize_tool_arguments(
+                _coerce_arguments(fn.get("arguments", {}))
+            )
             log.debug("agent_runner tool name=%s args_keys=%s", name, list(arguments.keys()))
 
             result = await tool_registry.execute_tool(name, arguments, allowed_scopes=allowed_scopes)
@@ -298,16 +538,30 @@ async def _verify_answer(
     )
 
     try:
-        raw = await ollama_client.generate_reasoning(prompt)
-        parsed = ollama_client.parse_json_response(raw)
-        if not parsed or "passed" not in parsed:
-            return {"passed": None, "error": "parse_failed", "raw": raw[:200]}
+        parsed = await asyncio.wait_for(
+            ollama_client.verify_agent_answer(
+                prompt,
+                timeout=config.OLLAMA_AGENT_VERIFY_TIMEOUT,
+            ),
+            timeout=config.OLLAMA_AGENT_VERIFY_TIMEOUT,
+        )
+        if parsed.get("error"):
+            error = parsed["error"]
+            if error not in {"parse_failed", "verifier_timeout"}:
+                error = "verifier_unavailable"
+            return {"passed": None, "error": error}
         return {
             "passed":             bool(parsed.get("passed")),
             "rationale":          str(parsed.get("rationale", "")),
             "unsupported_claims": list(parsed.get("unsupported_claims") or []),
             "evidence_gap":       bool(parsed.get("evidence_gap", False)),
         }
+    except asyncio.TimeoutError:
+        log.warning(
+            "agent_runner verifier timeout limit=%.1fs",
+            config.OLLAMA_AGENT_VERIFY_TIMEOUT,
+        )
+        return {"passed": None, "error": "verifier_timeout"}
     except Exception as exc:
         log.debug("agent_runner verifier failed: %s", exc)
         return {"passed": None, "error": "verifier_unavailable"}
