@@ -202,6 +202,14 @@ class AgentRunRequest(BaseModel):
     system_prompt: Optional[str] = None
     allowed_scopes: Optional[list[str]] = None   # None = all scopes permitted
 
+class LogLevelRequest(BaseModel):
+    level: str                         # TRACE | DEBUG | INFO | WARNING | ERROR
+
+class LogLevelResponse(BaseModel):
+    previous: str
+    current: str
+
+
 class AgentRunResponse(BaseModel):
     run_id: str
     status: str                      # "running" | "complete" | "error"

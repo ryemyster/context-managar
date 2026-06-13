@@ -44,6 +44,7 @@ from .models import (
     ScanRequest, FindRequest, DependenciesRequest, SummarizeRequest,
     ContextRequest, DiffRequest, VectorSearchRequest, IndexRequest, DraftRequest, ScaffoldRequest, IssueAuditRequest,
     AgentRunRequest, AgentRunResponse,
+    LogLevelRequest, LogLevelResponse,
     ToolCallRequest,
     HealthResponse, ScanResponse, FindResponse, RoutesResponse,
     DependenciesResponse, SummarizeResponse, ContextResponse,
@@ -457,6 +458,11 @@ async def setup():
         "**POST /scaffold** — multi-file delegation to preserve context window. "
         '`{"task": "...", "files": [{"file": "...", "spec": "...", "mode": "create"}], "context_files": [...]}` → `scaffold-<slug>.md` per file\n\n'
 
+        "**GET /log-level** — return current log level: `{\"previous\": \"WARNING\", \"current\": \"WARNING\"}`\n\n"
+        "**POST /log-level** — change log level at runtime without a restart. "
+        '`{"level": "DEBUG"}` → `{"previous": "WARNING", "current": "DEBUG"}`. '
+        "Valid levels: TRACE | DEBUG | INFO | WARNING | ERROR. Changes are in-memory only — reverts on restart.\n\n"
+
         "\n---\n\n"
 
         "## Implementation details\n"
@@ -545,6 +551,37 @@ async def setup():
         "```\n"
         "\n---\n"
     )
+
+
+# ── Log level ──────────────────────────────────────────────────────────────────
+
+@app.get("/log-level", response_model=LogLevelResponse)
+async def get_log_level():
+    import logging
+    current = logging.getLevelName(log.level)
+    return LogLevelResponse(previous=current, current=current)
+
+
+@app.post("/log-level", response_model=LogLevelResponse)
+async def set_log_level(req: LogLevelRequest):
+    import logging
+    from .logger import TRACE
+    previous = logging.getLevelName(log.level)
+    level_map = {
+        "TRACE":   TRACE,
+        "DEBUG":   logging.DEBUG,
+        "INFO":    logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR":   logging.ERROR,
+    }
+    new_level = level_map.get(req.level.upper())
+    if new_level is None:
+        raise HTTPException(status_code=400, detail=f"Unknown level '{req.level}'. Valid: TRACE DEBUG INFO WARNING ERROR")
+    log.setLevel(new_level)
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        logging.getLogger(name).setLevel(new_level)
+    log.warning("log level changed previous=%s current=%s", previous, req.level.upper())
+    return LogLevelResponse(previous=previous, current=req.level.upper())
 
 
 # ── Scan ───────────────────────────────────────────────────────────────────────

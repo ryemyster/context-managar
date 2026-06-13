@@ -37,6 +37,7 @@ async def generate(prompt: str) -> str:
     Caller should check if response starts with "[" to detect errors.
     """
     log.debug("ollama generate model=%s prompt_len=%d", config.OLLAMA_MODEL, len(prompt))
+    log.trace("ollama generate prompt=%r", prompt[:500])
     t0 = time.monotonic()
     try:
         r = await get_client().post(
@@ -56,6 +57,7 @@ async def generate(prompt: str) -> str:
         r.raise_for_status()
         result = r.json().get("response", "").strip()
         log.debug("ollama generate done dur=%.2fs response_len=%d", time.monotonic() - t0, len(result))
+        log.trace("ollama generate response=%r", result[:500])
         return result
     except httpx.TimeoutException:
         log.warning("ollama generate timeout model=%s dur=%.2fs prompt_len=%d", config.OLLAMA_MODEL, time.monotonic() - t0, len(prompt))
@@ -72,6 +74,7 @@ async def generate_reasoning(prompt: str) -> str:
     Returns error string on failure — caller checks for leading "[".
     """
     log.debug("ollama reasoning model=%s prompt_len=%d", config.OLLAMA_REASON_MODEL, len(prompt))
+    log.trace("ollama reasoning prompt=%r", prompt[:500])
     t0 = time.monotonic()
     try:
         r = await get_client().post(
@@ -92,6 +95,7 @@ async def generate_reasoning(prompt: str) -> str:
         r.raise_for_status()
         result = r.json().get("response", "").strip()
         log.debug("ollama reasoning done dur=%.2fs response_len=%d", time.monotonic() - t0, len(result))
+        log.trace("ollama reasoning response=%r", result[:500])
         return result
     except httpx.TimeoutException:
         log.warning("ollama reasoning timeout model=%s dur=%.2fs", config.OLLAMA_REASON_MODEL, time.monotonic() - t0)
