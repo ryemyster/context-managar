@@ -13,9 +13,17 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
+
+os.environ.setdefault(
+    "OUTPUT_DIR",
+    str(Path.home() / "Library/Application Support/context-store/artifacts"),
+)
+sys.path.insert(0, os.path.dirname(__file__))
+from app import artifact_store
 
 
 ENGINE_BASE = os.getenv("CONTEXT_ENGINE_URL", "http://localhost:8088").rstrip("/")
@@ -27,6 +35,26 @@ SERVER_VERSION = "2.0.0"
 REQUEST_TIMEOUT = float(os.getenv("CONTEXT_ENGINE_MCP_REQUEST_TIMEOUT", "120"))
 RUN_TIMEOUT = float(os.getenv("CONTEXT_ENGINE_MCP_RUN_TIMEOUT", "900"))
 POLL_INTERVAL = float(os.getenv("CONTEXT_ENGINE_MCP_POLL_INTERVAL", "1"))
+MCP_INLINE_LIMIT = int(os.getenv("MCP_INLINE_LIMIT", "1000"))
+MCP_RESPONSE_MODES = ["auto", "summary", "inline"]
+
+CONTROL_PLANE_DESCRIPTION = (
+    "Large outputs are written to artifacts. This MCP tool returns references "
+    "and concise summaries by default; read artifacts selectively when additional "
+    "detail is required. Pass mode='inline' only when the full payload should be "
+    "injected into the active conversation."
+)
+
+LARGE_RESULT_TOOLS = {
+    "investigate_codebase",
+    "load_context",
+    "review_diff",
+    "audit_issue",
+    "dependency_analysis",
+    "draft_file",
+    "scaffold_files",
+    "route_analysis",
+}
 
 
 def _schema(
@@ -37,10 +65,23 @@ def _schema(
 ) -> dict[str, Any]:
     return {
         "name": name,
-        "description": description,
+        "description": f"{description} {CONTROL_PLANE_DESCRIPTION}",
         "inputSchema": {
             "type": "object",
-            "properties": properties,
+            "properties": {
+                **properties,
+                "mode": {
+                    "type": "string",
+                    "enum": MCP_RESPONSE_MODES,
+                    "default": "auto",
+                    "description": (
+                        "MCP response mode. 'auto' returns a reference when the "
+                        "serialized payload exceeds MCP_INLINE_LIMIT. 'summary' "
+                        "always returns artifact metadata and a concise summary. "
+                        "'inline' preserves the original full response."
+                    ),
+                },
+            },
             "required": required,
             "additionalProperties": False,
         },
@@ -268,6 +309,75 @@ TOOLS = [
         },
         ["query"],
     ),
+    _schema(
+        "route_analysis",
+        (
+            "ADVANCED DIRECT TOOL. Call the existing POST /routes workflow for a "
+            "Next.js route inventory. Prefer investigate_codebase when routes "
+            "must be interpreted with surrounding code evidence."
+        ),
+        {},
+        [],
+    ),
+    _schema(
+        "draft_file",
+        (
+            "ADVANCED DIRECT TOOL. Call the existing POST /draft workflow for a "
+            "single-file mechanical generation draft. The caller owns review and "
+            "all repository writes."
+        ),
+        {
+            "task": {"type": "string", "minLength": 1},
+            "file": {"type": "string", "minLength": 1},
+            "context_files": {
+                "type": "array",
+                "items": {"type": "string"},
+                "default": [],
+            },
+            "draft_mode": {
+                "type": "string",
+                "enum": ["create", "edit"],
+                "default": "edit",
+                "description": "Generation mode passed through to REST /draft.",
+            },
+        },
+        ["task", "file"],
+    ),
+    _schema(
+        "scaffold_files",
+        (
+            "ADVANCED DIRECT TOOL. Call the existing POST /scaffold workflow for "
+            "mechanical multi-file generation. The caller owns review and all "
+            "repository writes."
+        ),
+        {
+            "task": {"type": "string", "minLength": 1},
+            "files": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "file": {"type": "string", "minLength": 1},
+                        "spec": {"type": "string", "minLength": 1},
+                        "mode": {
+                            "type": "string",
+                            "enum": ["create", "edit"],
+                            "default": "create",
+                        },
+                    },
+                    "required": ["file", "spec"],
+                    "additionalProperties": False,
+                },
+                "minItems": 1,
+            },
+            "context_files": {
+                "type": "array",
+                "items": {"type": "string"},
+                "default": [],
+            },
+        },
+        ["task", "files"],
+    ),
 ]
 
 TOOL_NAMES = {tool["name"] for tool in TOOLS}
@@ -352,22 +462,179 @@ async def _poll_run(status_path: str, initial: dict[str, Any]) -> dict[str, Any]
     return result
 
 
-async def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+def _json_size(payload: dict[str, Any]) -> int:
+    return len(json.dumps(payload, sort_keys=True, default=str))
+
+
+def _token_estimate(payload: dict[str, Any]) -> int:
+    return max(1, _json_size(payload) // 4)
+
+
+def _first_text(value: Any, *, limit: int = 220) -> str:
+    if isinstance(value, str) and value.strip():
+        text = " ".join(value.split())
+        return text[:limit]
+    if isinstance(value, list):
+        for item in value:
+            text = _first_text(item, limit=limit)
+            if text:
+                return text
+    if isinstance(value, dict):
+        for key in ("summary", "final_answer", "purpose", "recommendation", "status"):
+            text = _first_text(value.get(key), limit=limit)
+            if text:
+                return text
+    return ""
+
+
+def _summarize_payload(name: str, payload: dict[str, Any]) -> str:
     if name == "investigate_codebase":
-        initial = await _request_json("POST", "/agents/run", payload=arguments)
-        return await _poll_run("/agents/run/status/{run_id}", initial)
+        calls = len(payload.get("tool_calls_made") or [])
+        status = payload.get("status") or payload.get("stopped_reason") or "complete"
+        answer = _first_text(payload.get("final_answer"), limit=180)
+        return f"Agent run {status}; {calls} tool calls. {answer}".strip()
     if name == "load_context":
-        return await _request_json("POST", "/context", payload=arguments)
+        files = len(payload.get("files") or [])
+        risks = len(payload.get("risks") or [])
+        summary = _first_text(payload.get("summary"), limit=180)
+        return f"Context bundle found {files} files and {risks} risks. {summary}".strip()
     if name == "review_diff":
-        return await _request_json("POST", "/diff-summary", payload=arguments)
+        files = len(payload.get("files_touched") or [])
+        risks = len(payload.get("risks") or [])
+        summary = _first_text(payload.get("summary"), limit=180)
+        return f"Diff review touched {files} files and found {risks} risks. {summary}".strip()
+    if name == "audit_issue":
+        findings = len(payload.get("findings") or [])
+        status = payload.get("status", "complete")
+        return f"Issue audit {status}; {findings} findings."
+    if name == "dependency_analysis":
+        internal = len(payload.get("internal") or [])
+        external = len(payload.get("external") or [])
+        graph = len(payload.get("graph") or {})
+        return f"Dependency analysis found {internal} internal imports, {external} external imports, and {graph} graph entries."
+    if name == "route_analysis":
+        routes = len(payload.get("routes") or [])
+        api = len(payload.get("api_routes") or [])
+        middleware = len(payload.get("middleware") or [])
+        return f"Route analysis found {routes} routes, {api} API routes, and {middleware} middleware files."
+    if name == "draft_file":
+        code_len = len(payload.get("code") or "")
+        return f"Draft generated for {payload.get('file', 'file')} in {payload.get('mode', 'edit')} mode; {code_len} characters of code."
+    if name == "scaffold_files":
+        total = payload.get("total", len(payload.get("files") or []))
+        errors = len(payload.get("errors") or [])
+        return f"Scaffold generated {total} files with {errors} errors."
+    return _first_text(payload) or f"{name} completed."
+
+
+def _artifact_type(name: str) -> str:
+    return {
+        "investigate_codebase": "agent_run",
+        "load_context": "context_bundle",
+        "review_diff": "diff_summary",
+        "audit_issue": "issue_audit",
+        "dependency_analysis": "dependency_graph",
+        "route_analysis": "routes",
+        "draft_file": "draft",
+        "scaffold_files": "scaffold",
+    }.get(name, name)
+
+
+def _existing_artifact_path(payload: dict[str, Any]) -> str | None:
+    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+    for key in ("markdown", "record"):
+        if artifacts.get(key):
+            return artifacts[key]
+    if payload.get("written_to"):
+        return payload["written_to"]
+    files = payload.get("files")
+    if isinstance(files, list):
+        for item in files:
+            if isinstance(item, dict) and item.get("written_to"):
+                return item["written_to"]
+    return None
+
+
+def _reference_response(
+    name: str,
+    request_arguments: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+    record = artifact_store.write_record(
+        tool=f"mcp/{name}",
+        request=request_arguments,
+        response=payload,
+        markdown=None,
+    )
+    source_artifact_path = _existing_artifact_path(payload)
+    artifact_path = source_artifact_path or record["record"]
+    return {
+        "artifact_id": artifacts.get("event_id") or record["event_id"],
+        "artifact_path": artifact_path,
+        "artifact_type": _artifact_type(name),
+        "summary": _summarize_payload(name, payload),
+        "token_estimate": _token_estimate(payload),
+        "metadata": {
+            "mode": "summary",
+            "mcp_record": record["record"],
+            "markdown": artifacts.get("markdown") or payload.get("written_to"),
+            "source_artifact_path": source_artifact_path,
+            "inline_limit": MCP_INLINE_LIMIT,
+            "serialized_bytes": _json_size(payload),
+        },
+    }
+
+
+def _classify_response(
+    name: str,
+    arguments: dict[str, Any],
+    payload: dict[str, Any],
+    response_mode: str,
+) -> dict[str, Any]:
+    if response_mode == "inline":
+        return payload
+    if response_mode == "summary":
+        return _reference_response(name, arguments, payload)
+    if name in LARGE_RESULT_TOOLS and _json_size(payload) > MCP_INLINE_LIMIT:
+        return _reference_response(name, arguments, payload)
+    return payload
+
+
+def _pop_response_mode(arguments: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    rest_arguments = dict(arguments)
+    mode = rest_arguments.pop("mode", "auto")
+    if mode not in MCP_RESPONSE_MODES:
+        mode = "auto"
+    return rest_arguments, mode
+
+
+async def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    rest_arguments, response_mode = _pop_response_mode(arguments)
+    if name == "draft_file":
+        draft_mode = rest_arguments.pop("draft_mode", "edit")
+        rest_arguments["mode"] = draft_mode
+    original_arguments = dict(rest_arguments)
+
+    if name == "investigate_codebase":
+        initial = await _request_json("POST", "/agents/run", payload=rest_arguments)
+        result = await _poll_run("/agents/run/status/{run_id}", initial)
+        return _classify_response(name, original_arguments, result, response_mode)
+    if name == "load_context":
+        result = await _request_json("POST", "/context", payload=rest_arguments)
+        return _classify_response(name, original_arguments, result, response_mode)
+    if name == "review_diff":
+        result = await _request_json("POST", "/diff-summary", payload=rest_arguments)
+        return _classify_response(name, original_arguments, result, response_mode)
     if name == "audit_issue":
         initial = await _request_json(
-            "POST", "/agents/issue-auditor/run", payload=arguments
+            "POST", "/agents/issue-auditor/run", payload=rest_arguments
         )
-        return await _poll_run(
+        result = await _poll_run(
             "/agents/issue-auditor/status/{run_id}",
             initial,
         )
+        return _classify_response(name, original_arguments, result, response_mode)
 
     endpoint_map = {
         "scan_directory": "/scan",
@@ -375,11 +642,15 @@ async def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         "summarize_file": "/summarize",
         "dependency_analysis": "/dependencies",
         "vector_search": "/vector-search",
+        "route_analysis": "/routes",
+        "draft_file": "/draft",
+        "scaffold_files": "/scaffold",
     }
     endpoint = endpoint_map.get(name)
     if endpoint is None:
         raise AdapterError(f"unknown tool: {name}")
-    return await _request_json("POST", endpoint, payload=arguments)
+    result = await _request_json("POST", endpoint, payload=rest_arguments)
+    return _classify_response(name, original_arguments, result, response_mode)
 
 
 async def handle(
@@ -406,7 +677,10 @@ async def handle(
                     "Context Engine is a junior engineer. Prefer "
                     "investigate_codebase for repository investigation. Use advanced "
                     "direct tools only for bounded primitive retrieval. The senior "
-                    "engineer verifies evidence and owns all repository writes."
+                    "engineer verifies evidence and owns all repository writes. "
+                    "Large outputs are written to artifacts. MCP returns references "
+                    "and summaries by default; read artifacts selectively when "
+                    "additional detail is required."
                 ),
             },
         )

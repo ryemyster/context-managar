@@ -54,8 +54,12 @@ async def test_tools_list_has_primary_tools_first_and_advanced_tools_last():
         "summarize_file",
         "dependency_analysis",
         "vector_search",
+        "route_analysis",
+        "draft_file",
+        "scaffold_files",
     ]
     assert "PRIMARY DELEGATION TOOL" in tools[0]["description"]
+    assert "Large outputs are written to artifacts" in tools[0]["description"]
     assert all(tool["inputSchema"]["additionalProperties"] is False for tool in tools)
 
 
@@ -138,6 +142,8 @@ async def test_audit_issue_starts_and_polls_auditor():
         ("summarize_file", "/summarize"),
         ("dependency_analysis", "/dependencies"),
         ("vector_search", "/vector-search"),
+        ("route_analysis", "/routes"),
+        ("scaffold_files", "/scaffold"),
     ],
 )
 async def test_sync_tools_route_to_existing_rest_endpoints(tool, endpoint):
@@ -155,6 +161,119 @@ async def test_sync_tools_route_to_existing_rest_endpoints(tool, endpoint):
         endpoint,
         payload={"value": "unchanged"},
     )
+
+
+@pytest.mark.asyncio
+async def test_draft_file_maps_draft_mode_to_rest_mode():
+    with patch.object(
+        mcp,
+        "_request_json",
+        new_callable=AsyncMock,
+        return_value={"file": "a.py", "mode": "create", "code": "print(1)"},
+    ) as request:
+        result = await mcp._call_tool(
+            "draft_file",
+            {"task": "Create file", "file": "a.py", "draft_mode": "create"},
+        )
+
+    assert result["mode"] == "create"
+    request.assert_awaited_once_with(
+        "POST",
+        "/draft",
+        payload={"task": "Create file", "file": "a.py", "mode": "create"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_auto_mode_returns_artifact_reference_for_large_result():
+    payload = {
+        "task": "Investigate",
+        "files": ["src/auth.py"],
+        "summary": "Found auth middleware.",
+        "risks": [],
+        "suggested_files": ["src/auth.py"],
+        "vector_hits": [],
+        "written_to": "/tmp/context-bundle.md",
+    }
+    with (
+        patch.object(mcp, "MCP_INLINE_LIMIT", 10),
+        patch.object(
+            mcp,
+            "_request_json",
+            new_callable=AsyncMock,
+            return_value=payload,
+        ),
+        patch.object(
+            mcp.artifact_store,
+            "write_record",
+            return_value={
+                "event_id": "mcp-load-1",
+                "record": "/tmp/records/mcp-load-1.json",
+                "markdown": None,
+                "event_log": "/tmp/events.jsonl",
+            },
+        ) as write_record,
+    ):
+        result = await mcp._call_tool("load_context", {"task": "Investigate"})
+
+    assert result["artifact_id"] == "mcp-load-1"
+    assert result["artifact_path"] == "/tmp/context-bundle.md"
+    assert result["artifact_type"] == "context_bundle"
+    assert result["token_estimate"] > 0
+    assert "Found auth middleware" in result["summary"]
+    write_record.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_inline_mode_preserves_full_large_result():
+    payload = {"summary": "x" * 2000, "written_to": "/tmp/context-bundle.md"}
+    with (
+        patch.object(mcp, "MCP_INLINE_LIMIT", 10),
+        patch.object(
+            mcp,
+            "_request_json",
+            new_callable=AsyncMock,
+            return_value=payload,
+        ),
+        patch.object(mcp.artifact_store, "write_record") as write_record,
+    ):
+        result = await mcp._call_tool(
+            "load_context",
+            {"task": "Investigate", "mode": "inline"},
+        )
+
+    assert result == payload
+    write_record.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_summary_mode_forces_reference_even_when_small():
+    payload = {"path": "src", "internal": [], "external": [], "graph": {}}
+    with (
+        patch.object(
+            mcp,
+            "_request_json",
+            new_callable=AsyncMock,
+            return_value=payload,
+        ),
+        patch.object(
+            mcp.artifact_store,
+            "write_record",
+            return_value={
+                "event_id": "mcp-deps-1",
+                "record": "/tmp/records/mcp-deps-1.json",
+                "markdown": None,
+                "event_log": "/tmp/events.jsonl",
+            },
+        ),
+    ):
+        result = await mcp._call_tool(
+            "dependency_analysis",
+            {"path": "src", "mode": "summary"},
+        )
+
+    assert result["artifact_id"] == "mcp-deps-1"
+    assert result["artifact_type"] == "dependency_graph"
 
 
 @pytest.mark.asyncio

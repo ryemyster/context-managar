@@ -16,6 +16,8 @@ PYTHON="$VENV/bin/python3"
 HOST="${CONTEXT_ENGINE_MCP_HOST:-127.0.0.1}"
 PORT="${CONTEXT_ENGINE_MCP_PORT:-8089}"
 MCP_URL="http://${HOST}:${PORT}/mcp"
+OUTPUT_DIR="${OUTPUT_DIR:-${HOME}/Library/Application Support/context-store/artifacts}"
+MCP_INLINE_LIMIT="${MCP_INLINE_LIMIT:-1000}"
 
 if [[ "${1:-}" == "--uninstall" ]]; then
   launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true
@@ -68,6 +70,10 @@ cat > "$PLIST" <<PLIST
     <string>${CONTEXT_ENGINE_MCP_RUN_TIMEOUT:-900}</string>
     <key>CONTEXT_ENGINE_MCP_POLL_INTERVAL</key>
     <string>${CONTEXT_ENGINE_MCP_POLL_INTERVAL:-1}</string>
+    <key>OUTPUT_DIR</key>
+    <string>${OUTPUT_DIR}</string>
+    <key>MCP_INLINE_LIMIT</key>
+    <string>${MCP_INLINE_LIMIT}</string>
   </dict>
 
   <key>StandardOutPath</key>

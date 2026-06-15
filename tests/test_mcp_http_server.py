@@ -33,6 +33,7 @@ def test_http_server_configuration():
     assert mcp_http.mcp.settings.stateless_http is True
     assert mcp_http.mcp.settings.json_response is True
     assert "Prefer investigate_codebase" in mcp_http.INSTRUCTIONS
+    assert "Large outputs are written to artifacts" in mcp_http.INSTRUCTIONS
 
 
 @pytest.mark.asyncio
@@ -60,6 +61,7 @@ async def test_investigate_codebase_delegates_to_existing_adapter():
             "max_iterations": 7,
             "system_prompt": None,
             "allowed_scopes": ["repo:read"],
+            "mode": "auto",
         },
     )
 
@@ -71,13 +73,13 @@ async def test_investigate_codebase_delegates_to_existing_adapter():
         (
             "load_context",
             "load_context",
-            {"task": "Load", "paths": [], "focus": [], "use_vector": False},
+            {"task": "Load", "paths": [], "focus": [], "use_vector": False, "mode": "auto"},
             {"task": "Load"},
         ),
         (
             "review_diff",
             "review_diff",
-            {"diff": "diff --git a/a b/a"},
+            {"diff": "diff --git a/a b/a", "mode": "auto"},
             {"diff": "diff --git a/a b/a"},
         ),
         (
@@ -90,6 +92,7 @@ async def test_investigate_codebase_delegates_to_existing_adapter():
                 "focus": [],
                 "requirements": [],
                 "use_vector": False,
+                "mode": "auto",
             },
             {"task": "Audit", "repo": "owner/repo", "paths": ["src"]},
         ),
@@ -114,8 +117,37 @@ async def test_investigate_codebase_delegates_to_existing_adapter():
         (
             "dependency_analysis",
             "dependency_analysis",
+            {"path": "owner/repo/src", "mode": "auto"},
             {"path": "owner/repo/src"},
-            {"path": "owner/repo/src"},
+        ),
+        (
+            "route_analysis",
+            "route_analysis",
+            {"mode": "auto"},
+            {},
+        ),
+        (
+            "draft_file",
+            "draft_file",
+            {
+                "task": "Draft",
+                "file": "owner/repo/a.py",
+                "context_files": [],
+                "draft_mode": "edit",
+                "mode": "auto",
+            },
+            {"task": "Draft", "file": "owner/repo/a.py"},
+        ),
+        (
+            "scaffold_files",
+            "scaffold_files",
+            {
+                "task": "Scaffold",
+                "files": [{"file": "owner/repo/a.py", "spec": "Create it"}],
+                "context_files": [],
+                "mode": "auto",
+            },
+            {"task": "Scaffold", "files": [{"file": "owner/repo/a.py", "spec": "Create it"}]},
         ),
         (
             "vector_search",

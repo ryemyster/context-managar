@@ -19,7 +19,9 @@ INSTRUCTIONS = (
     "investigate_codebase for repository investigation instead of manually "
     "chaining advanced retrieval tools. The existing REST agent owns planning, "
     "repository exploration, memory, verification, repair passes, and evidence. "
-    "The senior engineer owns architecture decisions and all repository writes."
+    "The senior engineer owns architecture decisions and all repository writes. "
+    "Large outputs are written to artifacts; MCP returns references and summaries "
+    "by default. Read artifacts selectively when additional detail is required."
 )
 
 mcp = FastMCP(
@@ -56,6 +58,7 @@ async def investigate_codebase(
     max_iterations: int = 10,
     system_prompt: str | None = None,
     allowed_scopes: list[str] | None = None,
+    mode: str = "auto",
 ) -> dict[str, Any]:
     return await _delegate(
         "investigate_codebase",
@@ -65,6 +68,7 @@ async def investigate_codebase(
             "max_iterations": max_iterations,
             "system_prompt": system_prompt,
             "allowed_scopes": allowed_scopes,
+            "mode": mode,
         },
     )
 
@@ -82,6 +86,7 @@ async def load_context(
     paths: list[str] | None = None,
     focus: list[str] | None = None,
     use_vector: bool = False,
+    mode: str = "auto",
 ) -> dict[str, Any]:
     return await _delegate(
         "load_context",
@@ -90,6 +95,7 @@ async def load_context(
             "paths": paths or [],
             "focus": focus or [],
             "use_vector": use_vector,
+            "mode": mode,
         },
     )
 
@@ -101,8 +107,8 @@ async def load_context(
         "Returns summary, risks, touched files, and test recommendations."
     ),
 )
-async def review_diff(diff: str) -> dict[str, Any]:
-    return await _delegate("review_diff", {"diff": diff})
+async def review_diff(diff: str, mode: str = "auto") -> dict[str, Any]:
+    return await _delegate("review_diff", {"diff": diff, "mode": mode})
 
 
 @mcp.tool(
@@ -119,6 +125,7 @@ async def audit_issue(
     focus: list[str] | None = None,
     requirements: list[str] | None = None,
     use_vector: bool = False,
+    mode: str = "auto",
 ) -> dict[str, Any]:
     return await _delegate(
         "audit_issue",
@@ -129,6 +136,7 @@ async def audit_issue(
             "focus": focus or [],
             "requirements": requirements or [],
             "use_vector": use_vector,
+            "mode": mode,
         },
     )
 
@@ -173,8 +181,72 @@ async def summarize_file(file: str) -> dict[str, Any]:
         "Prefer investigate_codebase for architectural conclusions."
     ),
 )
-async def dependency_analysis(path: str) -> dict[str, Any]:
-    return await _delegate("dependency_analysis", {"path": path})
+async def dependency_analysis(path: str, mode: str = "auto") -> dict[str, Any]:
+    return await _delegate("dependency_analysis", {"path": path, "mode": mode})
+
+
+@mcp.tool(
+    name="route_analysis",
+    description=(
+        "ADVANCED DIRECT TOOL. Extract a route inventory through /routes. Large "
+        "outputs are written to artifacts; the tool returns references and "
+        "summaries by default."
+    ),
+)
+async def route_analysis(mode: str = "auto") -> dict[str, Any]:
+    return await _delegate("route_analysis", {"mode": mode})
+
+
+@mcp.tool(
+    name="draft_file",
+    description=(
+        "ADVANCED DIRECT TOOL. Generate a single-file draft through /draft. The "
+        "caller owns review and all repository writes. Large outputs are written "
+        "to artifacts by default."
+    ),
+)
+async def draft_file(
+    task: str,
+    file: str,
+    context_files: list[str] | None = None,
+    draft_mode: str = "edit",
+    mode: str = "auto",
+) -> dict[str, Any]:
+    return await _delegate(
+        "draft_file",
+        {
+            "task": task,
+            "file": file,
+            "context_files": context_files or [],
+            "draft_mode": draft_mode,
+            "mode": mode,
+        },
+    )
+
+
+@mcp.tool(
+    name="scaffold_files",
+    description=(
+        "ADVANCED DIRECT TOOL. Generate multi-file drafts through /scaffold. The "
+        "caller owns review and all repository writes. Large outputs are written "
+        "to artifacts by default."
+    ),
+)
+async def scaffold_files(
+    task: str,
+    files: list[dict[str, Any]],
+    context_files: list[str] | None = None,
+    mode: str = "auto",
+) -> dict[str, Any]:
+    return await _delegate(
+        "scaffold_files",
+        {
+            "task": task,
+            "files": files,
+            "context_files": context_files or [],
+            "mode": mode,
+        },
+    )
 
 
 @mcp.tool(

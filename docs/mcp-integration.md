@@ -119,6 +119,20 @@ The MCP launchd service accepts:
 | `CONTEXT_ENGINE_MCP_REQUEST_TIMEOUT` | `120` | Individual REST request timeout in seconds |
 | `CONTEXT_ENGINE_MCP_RUN_TIMEOUT` | `900` | Agent or issue-audit polling deadline |
 | `CONTEXT_ENGINE_MCP_POLL_INTERVAL` | `1` | Poll interval in seconds |
+| `OUTPUT_DIR` | `~/Library/Application Support/context-store/artifacts` | Artifact store used for MCP summary/reference records |
+| `MCP_INLINE_LIMIT` | `1000` | Serialized payload byte limit before `mode="auto"` returns an artifact reference |
+
+## Response Modes
+
+MCP is a control plane. REST endpoints still return their existing payloads, but
+large MCP tool responses default to artifact references so they do not expand the
+active LLM conversation.
+
+| Mode | Behavior |
+|---|---|
+| `auto` | Default. Return inline for small responses; write and return an artifact reference when a large-result payload exceeds `MCP_INLINE_LIMIT`. |
+| `summary` | Always write the full payload to an MCP artifact record and return `artifact_id`, `artifact_path`, `artifact_type`, `summary`, `token_estimate`, and metadata. |
+| `inline` | Preserve the old behavior and return the full REST payload directly. |
 
 ## Example Calls
 
