@@ -13,7 +13,7 @@ from app.main import setup
 
 
 @pytest.mark.asyncio
-async def test_setup_documents_mcp_routing_and_agent_boundaries():
+async def test_setup_is_context_safe_operational_playbook():
     models = [
         config.OLLAMA_MODEL,
         config.OLLAMA_AGENT_MODEL,
@@ -24,14 +24,19 @@ async def test_setup_documents_mcp_routing_and_agent_boundaries():
          patch("app.main.supabase_vector.is_available", new_callable=AsyncMock, return_value=True):
         body = await setup()
 
-    assert "investigate_codebase` — primary/default" in body
-    assert f"Agent model (`{config.OLLAMA_AGENT_MODEL}`) | available" in body
-    assert f"capped at `{config.OLLAMA_AGENT_MEMORY_TIMEOUT:g}s`" in body
-    assert f"capped at `{config.OLLAMA_AGENT_CALL_TIMEOUT:g}s`" in body
-    assert f"capped at `{config.OLLAMA_AGENT_SELECT_TIMEOUT:g}s`" in body
-    assert f"capped at `{config.OLLAMA_AGENT_VERIFY_TIMEOUT:g}s`" in body
-    assert '"verifier_timeout"' in body
-    assert "A response cannot become a final answer before an enabled tool returns evidence" in body
-    assert "constrained JSON action schema" in body
-    assert "remain recovery paths" in body
-    assert "Model routing" in body
+    assert body.startswith("# Context Engine Usage Guide")
+    assert "Context Engine is a retrieval system." in body
+    assert "Use references first." in body
+    assert "Retrieve details only when necessary." in body
+    assert "Avoid loading large artifacts into context." in body
+    assert "### Step 1: Discover" in body
+    assert "### Step 2: Narrow" in body
+    assert "### Step 3: Read" in body
+    assert "### Step 4: Execute" in body
+    assert "### Step 5: Refresh" in body
+    assert "find -> read -> act" in body
+    assert "scan everything -> read everything -> act" in body
+    assert "Small task: 1-3 artifacts" in body
+    assert "mode=context_safe" in body
+    assert "Token-Saving Rationale" in body
+    assert f"Code model (`{config.OLLAMA_MODEL}`) | available" in body

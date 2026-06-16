@@ -277,6 +277,44 @@ async def test_summary_mode_forces_reference_even_when_small():
 
 
 @pytest.mark.asyncio
+async def test_context_safe_mode_forwards_to_rest_and_returns_reference():
+    payload = {
+        "results": [{"path": "owner/repo/app.py", "summary": "small"}],
+        "metadata": {"detail_level": "summary", "result_count": 1},
+    }
+    with (
+        patch.object(
+            mcp,
+            "_request_json",
+            new_callable=AsyncMock,
+            return_value=payload,
+        ) as request,
+        patch.object(
+            mcp.artifact_store,
+            "write_record",
+            return_value={
+                "event_id": "mcp-find-1",
+                "record": "/tmp/records/mcp-find-1.json",
+                "markdown": None,
+                "event_log": "/tmp/events.jsonl",
+            },
+        ),
+    ):
+        result = await mcp._call_tool(
+            "find_in_code",
+            {"query": "auth", "path": "owner/repo", "mode": "context_safe"},
+        )
+
+    request.assert_awaited_once_with(
+        "POST",
+        "/find",
+        payload={"query": "auth", "path": "owner/repo", "mode": "context_safe"},
+    )
+    assert result["artifact_type"] == "find_in_code"
+    assert result["metadata"]["mode"] == "summary"
+
+
+@pytest.mark.asyncio
 async def test_tools_call_returns_json_text_content():
     payload = {
         "final_answer": "Evidence-based answer",

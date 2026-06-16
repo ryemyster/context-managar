@@ -17,7 +17,7 @@ import traceback
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from . import config
@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
 from . import markdown_writer as mw
 from . import artifact_store
 from .models import (
-    ScanRequest, FindRequest, DependenciesRequest, SummarizeRequest,
+    ScanRequest, FindRequest, DependenciesRequest, RoutesRequest, ReadRequest, SummarizeRequest,
     ContextRequest, DiffRequest, VectorSearchRequest, IndexRequest, DraftRequest, ScaffoldRequest, IssueAuditRequest,
     AgentRunRequest, AgentRunResponse,
     LogLevelRequest, LogLevelResponse,
@@ -56,6 +56,7 @@ from .search_worker import find_in_repo, extract_imports
 from .route_extractor import extract_routes
 from .dependency_mapper import map_dependencies
 from .scanner import scan_directory
+from .response_shaper import limits_for, reference, read_response, shaped_response
 from .diff_reviewer import review_diff
 from .context_builder import build_context
 from .issue_auditor import collect_agent_evidence, findings_from_evidence, insufficient_evidence_findings
@@ -296,6 +297,164 @@ async def debug():
 @app.get("/setup", response_class=__import__("fastapi").responses.PlainTextResponse)
 async def setup():
     """
+    Operational playbook for AI agents.
+
+    This endpoint is intentionally context-safe: it teaches retrieval behavior
+    without embedding a full configuration manual into the caller's session.
+    """
+    models   = await ollama_client.list_models()
+    model_ok = any(config.OLLAMA_MODEL       in m for m in models)
+    embed_ok = any(config.OLLAMA_EMBED_MODEL in m for m in models)
+    vec_ok   = await supabase_vector.is_available()
+    repo     = str(config.REPO_ROOT)
+    base     = "http://localhost:8088"
+
+    gen_status = "available" if model_ok else "offline"
+    emb_status = "available" if embed_ok else "offline"
+    vec_status = "ready" if vec_ok else "not indexed"
+
+    return (
+        "# Context Engine Usage Guide\n\n"
+        f"_Base URL: `{base}` · REPO_ROOT: `{repo}`_\n\n"
+
+        "## Core Principle\n\n"
+        "Context Engine is a retrieval system.\n\n"
+        "Use references first.\n"
+        "Retrieve details only when necessary.\n\n"
+        "Avoid loading large artifacts into context.\n\n"
+
+        "## Recommended Workflow\n\n"
+        "### Step 1: Discover\n\n"
+        "Use:\n\n"
+        "- `/find`\n"
+        "- `/vector-search`\n"
+        "- `/scan`\n\n"
+        "Goal: identify candidate artifacts.\n\n"
+        "Do not immediately load content.\n\n"
+        "Example requests:\n\n"
+        "```json\n"
+        "{\"query\":\"auth middleware\",\"path\":\"owner/repo/src\",\"mode\":\"context_safe\",\"max_results\":8}\n"
+        "```\n\n"
+        "```json\n"
+        "{\"query\":\"session validation\",\"limit\":5,\"mode\":\"context_safe\"}\n"
+        "```\n\n"
+        "```json\n"
+        "{\"path\":\"owner/repo/src/app/api\",\"mode\":\"context_safe\",\"max_results\":10}\n"
+        "```\n\n"
+
+        "### Step 2: Narrow\n\n"
+        "Use:\n\n"
+        "- scores\n"
+        "- summaries\n"
+        "- metadata\n"
+        "- paths\n\n"
+        "Select only the most relevant items. Prefer high-score references with "
+        "specific paths and summaries that directly match the task.\n\n"
+
+        "### Step 3: Read\n\n"
+        "Use:\n\n"
+        "- `/read`\n"
+        "- equivalent content endpoint\n\n"
+        "Only read selected artifacts.\n\n"
+        "Prefer summary mode.\n\n"
+        "Use full mode only when implementation requires exact details.\n\n"
+        "Example request:\n\n"
+        "```json\n"
+        "{\"path\":\"owner/repo/src/auth/middleware.ts\",\"max_chars\":12000}\n"
+        "```\n\n"
+
+        "### Step 4: Execute\n\n"
+        "Perform work using the minimal required context. Verify cited source files "
+        "before making repository changes or final claims.\n\n"
+
+        "### Step 5: Refresh\n\n"
+        "Repeat discovery if context becomes stale.\n\n"
+        "Do not preload repositories.\n\n"
+
+        "## Anti-Patterns\n\n"
+        "Avoid:\n\n"
+        "- Reading entire repositories\n"
+        "- Reading large files before relevance is established\n"
+        "- Loading multiple architecture documents simultaneously\n"
+        "- Returning full scan results\n"
+        "- Using full-detail mode by default\n\n"
+
+        "## Claude Code Guidance\n\n"
+        "Preferred:\n\n"
+        "```text\n"
+        "find -> read -> act\n"
+        "```\n\n"
+        "Not:\n\n"
+        "```text\n"
+        "scan everything -> read everything -> act\n"
+        "```\n\n"
+
+        "## Context Budget Guidance\n\n"
+        "Small task: 1-3 artifacts\n\n"
+        "Medium task: 3-10 artifacts\n\n"
+        "Large task: 10+ artifacts only when explicitly justified\n\n"
+
+        "## Endpoint Recommendations\n\n"
+        "Discovery:\n\n"
+        "- `/find`\n"
+        "- `/vector-search`\n\n"
+        "Inspection:\n\n"
+        "- `/read`\n\n"
+        "Repository Understanding:\n\n"
+        "- `/routes`\n"
+        "- `/dependencies`\n\n"
+        "Summaries:\n\n"
+        "- `/summarize`\n\n"
+
+        "## Context-Safe Mode\n\n"
+        "Always prefer:\n\n"
+        "```text\n"
+        "mode=context_safe\n"
+        "```\n\n"
+        "unless detailed implementation work requires otherwise.\n\n"
+
+        "## Example Workflows\n\n"
+        "Bug fix:\n\n"
+        "1. `/find` with `mode=context_safe` for the failing symbol or error text.\n"
+        "2. Narrow to 1-3 candidate files using paths, summaries, scores, and metadata.\n"
+        "3. `/read` only those files with a bounded `max_chars`.\n"
+        "4. Make the fix, then use `/diff-summary` for risk review.\n\n"
+        "Architecture question:\n\n"
+        "1. `/dependencies` or `/routes` with `mode=context_safe` on the smallest relevant path.\n"
+        "2. Use returned references to choose the subsystem boundary.\n"
+        "3. `/read` only the entry points and directly related files.\n"
+        "4. Refresh discovery if the evidence points to a different subsystem.\n\n"
+        "Semantic lookup:\n\n"
+        "1. `/vector-search` with a narrow query, low `limit`, and `mode=context_safe`.\n"
+        "2. Compare summaries and scores.\n"
+        "3. `/read` the top matching artifact only when exact code or prose is required.\n\n"
+
+        "## Agent Usage Recommendations\n\n"
+        "- Treat discovery responses as an index, not as source truth.\n"
+        "- Use `metadata.truncated` and `metadata.payload_bytes` to decide whether to narrow further.\n"
+        "- Prefer `max_results` and `max_chars` on every exploratory request.\n"
+        "- Escalate to `detail=full` only after a reference is proven relevant.\n"
+        "- If the service is unavailable, continue without it; do not block the task.\n\n"
+
+        "## Token-Saving Rationale\n\n"
+        "References preserve discoverability while avoiding permanent insertion of "
+        "large file bodies, route maps, dependency graphs, and artifacts into the "
+        "agent session. The efficient pattern is to spend cheap retrieval calls on "
+        "candidate discovery, then spend context only on the few artifacts needed "
+        "for judgment or implementation.\n\n"
+
+        "## Live Status\n\n"
+        "| Capability | Status |\n"
+        "|---|---|\n"
+        f"| Code model (`{config.OLLAMA_MODEL}`) | {gen_status} |\n"
+        f"| Embeddings (`{config.OLLAMA_EMBED_MODEL}`) | {emb_status} |\n"
+        f"| Vector index | {vec_status} |\n"
+    )
+
+
+@app.get("/setup-legacy", response_class=__import__("fastapi").responses.PlainTextResponse)
+async def setup_legacy():
+    """
     Agent instruction protocol. Any AI agent can fetch this to understand how to
     integrate with context-engine. Live state is embedded — no stale docs.
     Audience: AI agent tools (Claude Code, Cursor, Copilot, custom agents).
@@ -336,7 +495,8 @@ async def setup():
         "MCP is a control plane: large outputs are written to artifacts and MCP returns "
         "artifact references plus concise summaries by default. Pass `mode=\"inline\"` only "
         "when the full payload should enter the active conversation; use `mode=\"summary\"` "
-        "to force artifact-reference responses. REST responses remain unchanged.\n\n"
+        "to force artifact-reference responses. REST discovery endpoints are also "
+        "reference-first by default; pass `detail=\"full\"` for legacy inline payloads.\n\n"
         "**Install/restart the launchd service:**\n"
         "```bash\n"
         "bash scripts/install-mcp.sh\n"
@@ -431,27 +591,36 @@ async def setup():
         "**POST /agents/issue-auditor/run** — async evidence-based issue triage; same async/poll pattern. "
         "Status: `complete` | `insufficient_evidence` | `error`.\n\n"
 
+        "**Discovery detail levels:** `/scan`, `/find`, `/routes`, `/dependencies`, and `/vector-search` "
+        "default to `detail=\"summary\"` and return `{id,title,type,score,path,summary}` references plus "
+        "`metadata` (`result_count`, `payload_bytes`, `estimated_tokens`, `truncated`, `detail_level`). "
+        "Use `detail=\"standard\"` for richer summaries, `detail=\"full\"` for legacy inline payloads, "
+        "or `mode=\"context_safe\"` for the smallest Claude-safe response. Use `/read` to fetch content intentionally.\n\n"
+
         "**POST /scan** — "
-        '`{"path": "owner/repo/src/app/api"}` → file list + patterns · `scan-<slug>.md`\n\n'
+        '`{"path": "owner/repo/src/app/api"}` → file references + patterns artifact · `scan-<slug>.md`\n\n'
 
         "**POST /find** — "
-        '`{"query": "rate limiting", "path": "owner/repo/src"}` → matches + synthesis · `find-<slug>.md`\n\n'
+        '`{"query": "rate limiting", "path": "owner/repo/src"}` → match references + synthesis artifact · `find-<slug>.md`\n\n'
+
+        "**POST /read** — "
+        '`{"path": "owner/repo/src/app/api/checkins/route.ts", "max_chars": 12000}` → explicit file content\n\n'
 
         "**POST /summarize** — "
         '`{"file": "owner/repo/src/app/api/checkins/route.ts"}` → purpose, deps, risks · `summary-<slug>.md`\n\n'
 
         "**POST /routes** — "
-        '`{"path": "owner/repo"}` → api_routes, page_routes, middleware · `routes.md`\n\n'
+        '`{"path": "owner/repo"}` → route references · `routes.md`\n\n'
 
         "**POST /dependencies** — "
-        '`{"path": "owner/repo/src/lib"}` → import graph · `dependencies-<slug>.md`\n\n'
+        '`{"path": "owner/repo/src/lib"}` → import references · `dependencies-<slug>.md`\n\n'
 
         "**POST /diff-summary** — "
         f'`{{"diff": "<git diff output>"}}` → summary, risks, test_recommendations · `diff-<hash>.md` '
         f"(paginate above ~{config.DIFF_MAX_CHARS:,} chars)\n\n"
 
         "**POST /vector-search** — "
-        '`{"query": "auth session middleware", "limit": 8}` → ranked chunks · `vector-<slug>.md` (requires `/index`)\n\n'
+        '`{"query": "auth session middleware", "limit": 8}` → ranked references · `vector-<slug>.md` (requires `/index`)\n\n'
 
         "**POST /index** — "
         '`{"paths": ["owner/repo/src"], "force": false}` — run once per session when code has changed\n\n'
@@ -605,6 +774,7 @@ async def scan(req: ScanRequest):
         raise HTTPException(status_code=404, detail=f"Path not found: {req.path!r}")
 
     result = await scan_directory(req.path)
+    detail, max_results, max_chars = limits_for(req)
 
     written = mw.write_scan(
         path=req.path,
@@ -616,7 +786,7 @@ async def scan(req: ScanRequest):
 
     asyncio.create_task(supabase_vector.store_artifact(written))
     log.debug("POST /scan done files=%d dur=%.2fs", len(result["files"]), time.monotonic() - t0)
-    return {
+    full_payload = {
         "path":         req.path,
         "files":        result["files"],
         "summary":      result["summary"],
@@ -624,6 +794,33 @@ async def scan(req: ScanRequest):
         "dependencies": result["dependencies"],
         "written_to":   written,
     }
+    refs = [
+        reference(
+            kind="file",
+            path=path,
+            title=path.rsplit("/", 1)[-1],
+            summary=f"Discovered by scan of {req.path}. Read with /read for content.",
+            score=1.0,
+            suffix=str(i),
+        )
+        for i, path in enumerate(result["files"])
+    ]
+    if detail == "standard":
+        refs.insert(0, reference(
+            kind="scan",
+            path=req.path,
+            title=f"Scan summary: {req.path}",
+            summary=f"{result['summary']} Patterns: {', '.join(result['patterns'][:5])}. Dependencies: {', '.join(result['dependencies'][:10])}.",
+            score=1.0,
+        ))
+    return shaped_response(
+        detail=detail,
+        results=refs,
+        full_payload=full_payload,
+        max_results=max_results,
+        max_chars=max_chars,
+        written_to=written,
+    )
 
 
 # ── Find ───────────────────────────────────────────────────────────────────────
@@ -636,7 +833,8 @@ async def find(req: FindRequest):
     """
     t0 = time.monotonic()
     log.debug("POST /find query=%r path=%s", req.query, req.path or "/")
-    matches = find_in_repo(req.query, req.path, max_results=config.MAX_SNIPPETS_PER_QUERY)
+    detail, max_results, max_chars = limits_for(req)
+    matches = find_in_repo(req.query, req.path, max_results=max_results)
 
     # Build snippet block from top matches
     match_snippets: list[tuple[str, str]] = []
@@ -667,26 +865,47 @@ Where is "{req.query}" implemented? Key files? (2-3 sentences)"""
 
     asyncio.create_task(supabase_vector.store_artifact(written))
     log.debug("POST /find done matches=%d dur=%.2fs", len(matches), time.monotonic() - t0)
-    return {
+    full_payload = {
         "query":      req.query,
         "path":       req.path,
         "matches":    [m["path"] for m in matches],
         "files":      [m["path"] for m in matches],
         "written_to": written,
     }
+    refs = [
+        reference(
+            kind="match",
+            path=m["path"],
+            title=f"{m['path']}:{m.get('line_no', 1)}",
+            summary=f"Line {m.get('line_no', 1)}: {m.get('line', '').strip()}",
+            score=1.0 - min(i, 20) * 0.02,
+            suffix=str(m.get("line_no", i)),
+        )
+        for i, m in enumerate(matches)
+    ]
+    return shaped_response(
+        detail=detail,
+        results=refs,
+        full_payload=full_payload,
+        max_results=max_results,
+        max_chars=max_chars,
+        written_to=written,
+    )
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 @app.post("/routes")
-async def routes():
+async def routes(req: RoutesRequest = Body(default_factory=RoutesRequest)):
     """
     Extract all Next.js routes. Deterministic + one model analysis call.
     Writes: /output/routes.md
     """
     t0 = time.monotonic()
     log.debug("POST /routes")
-    routes_data = extract_routes()
+    detail, max_results, max_chars = limits_for(req)
+    base = safe_resolve(req.path) if req.path and req.path != "." else None
+    routes_data = extract_routes(base)
 
     api_routes = routes_data["api_routes"]
     if api_routes:
@@ -717,7 +936,7 @@ async def routes():
 
     asyncio.create_task(supabase_vector.store_artifact(written))
     log.debug("POST /routes done api=%d pages=%d dur=%.2fs", len(routes_data["api_routes"]), len(routes_data["page_routes"]), time.monotonic() - t0)
-    return {
+    full_payload = {
         "routes":         all_routes,
         "api_routes":     [r["path"] for r in routes_data["api_routes"]],
         "server_actions": routes_data["server_actions"],
@@ -725,6 +944,37 @@ async def routes():
         "auth_paths":     routes_data["auth_paths"],
         "written_to":     written,
     }
+    refs: list[dict] = []
+    for r in routes_data["api_routes"]:
+        refs.append(reference(
+            kind="api_route",
+            path=r["path"],
+            title=r["path"],
+            summary=f"API route methods: {', '.join(r.get('methods') or ['unknown'])}. Read with /read for handler content.",
+            score=1.0,
+        ))
+    refs.extend(reference(
+        kind="page_route",
+        path=path,
+        title=path,
+        summary="Next.js page route. Read with /read for content.",
+        score=0.9,
+    ) for path in routes_data["page_routes"])
+    refs.extend(reference(
+        kind="middleware",
+        path=m["path"],
+        title=m["path"],
+        summary=f"Middleware matchers: {', '.join(m.get('matchers') or ['unspecified'])}.",
+        score=0.95,
+    ) for m in routes_data["middleware"])
+    return shaped_response(
+        detail=detail,
+        results=refs,
+        full_payload=full_payload,
+        max_results=max_results,
+        max_chars=max_chars,
+        written_to=written,
+    )
 
 
 # ── Dependencies ───────────────────────────────────────────────────────────────
@@ -737,18 +987,65 @@ async def dependencies(req: DependenciesRequest):
     """
     t0 = time.monotonic()
     log.debug("POST /dependencies path=%s", req.path or "/")
+    detail, max_results, max_chars = limits_for(req)
     dep_data = map_dependencies(req.path)
     written  = mw.write_dependencies(req.path, dep_data)
     asyncio.create_task(supabase_vector.store_artifact(written))
     log.debug("POST /dependencies done dur=%.2fs", time.monotonic() - t0)
 
-    return {
+    full_payload = {
         "path":       req.path,
         "internal":   dep_data["internal"],
         "external":   dep_data["external"],
         "graph":      dep_data["graph"],
         "written_to": written,
     }
+    refs = [
+        reference(
+            kind="dependency_file",
+            path=path,
+            title=path,
+            summary=f"Imports: {', '.join(imports[:8]) or 'none detected'}.",
+            score=1.0 - min(i, 20) * 0.02,
+        )
+        for i, (path, imports) in enumerate(dep_data["graph"].items())
+    ]
+    if detail == "standard":
+        refs.insert(0, reference(
+            kind="dependency_summary",
+            path=req.path,
+            title=f"Dependencies: {req.path}",
+            summary=f"External packages: {', '.join(dep_data['external'][:20])}. Internal imports: {', '.join(dep_data['internal'][:20])}.",
+            score=1.0,
+        ))
+    return shaped_response(
+        detail=detail,
+        results=refs,
+        full_payload=full_payload,
+        max_results=max_results,
+        max_chars=max_chars,
+        written_to=written,
+    )
+
+
+# ── Read ───────────────────────────────────────────────────────────────────────
+
+@app.post("/read")
+async def read(req: ReadRequest):
+    """
+    Dedicated content fetch endpoint.
+
+    Search/discovery endpoints return references by default; callers use /read
+    when they intentionally want file content in the response.
+    """
+    f = safe_resolve(req.path)
+    if not f.exists() or not f.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {req.path!r}")
+    max_chars = req.max_chars or config.MAX_FILE_BYTES
+    content = read_file(f, max_bytes=max_chars + 1)
+    if not content:
+        raise HTTPException(status_code=422, detail="File is empty or unreadable")
+    return read_response(req.path, content, max_chars)
 
 
 # ── Summarize ──────────────────────────────────────────────────────────────────
@@ -1087,37 +1384,74 @@ async def vector_search(req: VectorSearchRequest):
     """
     t0 = time.monotonic()
     log.debug("POST /vector-search query=%r limit=%d", req.query, req.limit)
+    detail, max_results, max_chars = limits_for(req)
     available = await supabase_vector.is_available()
 
     if not available:
         log.debug("POST /vector-search skipped — vector store not available")
-        return {
+        full_payload = {
             "query":      req.query,
             "matches":    [],
             "written_to": "",
             "available":  False,
         }
+        return shaped_response(
+            detail=detail,
+            results=[],
+            full_payload=full_payload,
+            max_results=max_results,
+            max_chars=max_chars,
+            available=False,
+        )
 
     embedding = await ollama_client.embed(req.query)
     if embedding is None:
         log.warning("POST /vector-search embed failed query=%r", req.query)
-        return {
+        full_payload = {
             "query":      req.query,
             "matches":    [],
             "written_to": "",
             "available":  False,
         }
+        return shaped_response(
+            detail=detail,
+            results=[],
+            full_payload=full_payload,
+            max_results=max_results,
+            max_chars=max_chars,
+            available=False,
+        )
 
-    matches  = await supabase_vector.search(embedding, limit=req.limit, threshold=req.threshold)
+    matches  = await supabase_vector.search(embedding, limit=max_results, threshold=req.threshold)
     written  = mw.write_vector_results(req.query, matches)
 
     log.debug("POST /vector-search done matches=%d dur=%.2fs", len(matches), time.monotonic() - t0)
-    return {
+    full_payload = {
         "query":      req.query,
         "matches":    matches,
         "written_to": written,
         "available":  True,
     }
+    refs = [
+        reference(
+            kind="vector_match",
+            path=m.get("path", ""),
+            title=m.get("path", ""),
+            summary=m.get("chunk", ""),
+            score=m.get("similarity"),
+            suffix=str(i),
+        )
+        for i, m in enumerate(matches)
+    ]
+    return shaped_response(
+        detail=detail,
+        results=refs,
+        full_payload=full_payload,
+        max_results=max_results,
+        max_chars=max_chars,
+        written_to=written,
+        available=True,
+    )
 
 
 # ── Index ──────────────────────────────────────────────────────────────────────

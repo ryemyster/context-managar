@@ -2,21 +2,40 @@
 models.py — Pydantic request/response models for all endpoints.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, field_validator
+
+
+DetailLevel = Literal["summary", "standard", "full"]
+ResponseMode = Literal["context_safe"]
+
+
+class DiscoveryOptions(BaseModel):
+    detail: DetailLevel = "summary"
+    mode: Optional[ResponseMode] = None
+    limit: Optional[int] = None
+    max_chars: Optional[int] = None
+    max_results: Optional[int] = None
 
 
 # ── Requests ───────────────────────────────────────────────────────────────────
 
-class ScanRequest(BaseModel):
+class ScanRequest(DiscoveryOptions):
     path: str = ""
 
-class FindRequest(BaseModel):
+class FindRequest(DiscoveryOptions):
     query: str
     path: str = "."
 
-class DependenciesRequest(BaseModel):
+class DependenciesRequest(DiscoveryOptions):
     path: str = "."
+
+class RoutesRequest(DiscoveryOptions):
+    path: str = "."
+
+class ReadRequest(BaseModel):
+    path: str
+    max_chars: Optional[int] = None
 
 class SummarizeRequest(BaseModel):
     file: str
@@ -46,7 +65,7 @@ class IssueAuditRequest(BaseModel):
     requirements: list[str] = []
     use_vector: bool = False
 
-class VectorSearchRequest(BaseModel):
+class VectorSearchRequest(DiscoveryOptions):
     query: str
     limit: int = 8
     threshold: float = 0.3   # cosine similarity floor; prose/markdown typically 0.2-0.5, code 0.5-0.8

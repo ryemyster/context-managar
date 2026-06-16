@@ -27,7 +27,7 @@ context-engine/
   mcp_http_server.py            # Streamable HTTP transport on :8089/mcp
   requirements-mcp.txt          # isolated MCP runtime dependencies
   app/
-    main.py                     # unchanged REST contracts and live /setup guide
+    main.py                     # REST endpoints and live /setup guide
     agent_runner.py             # existing junior agent loop
     tool_registry.py            # existing internal repository tools
 tests/
@@ -64,6 +64,14 @@ Advanced direct tools:
 Prefer `investigate_codebase` over manually chaining advanced tools. Advanced
 tools are for bounded primitive retrieval when the caller already knows the
 single operation it needs.
+
+Discovery endpoints are reference-first by default. `/scan`, `/find`,
+`/routes`, `/dependencies`, and `/vector-search` default to `detail="summary"`
+and return compact references plus `metadata` (`result_count`,
+`payload_bytes`, `estimated_tokens`, `truncated`, `detail_level`). Use
+`mode="context_safe"` for the smallest Claude-safe payload, `detail="standard"`
+for richer summaries, and `detail="full"` only for legacy inline payloads.
+Fetch file content deliberately with `POST /read`.
 
 ## Claude Code
 

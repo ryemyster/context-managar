@@ -124,11 +124,12 @@ enabled tool or a final answer from accumulated evidence.
 | Method | Path | Model | Description |
 |--------|------|-------|-------------|
 | POST | `/context` | nomic → qwen | Full context bundle for a task |
-| POST | `/scan` | qwen | Walk directory, extract patterns |
-| POST | `/find` | qwen | Grep + synthesize matches |
+| POST | `/scan` | qwen | Walk directory, return file references by default |
+| POST | `/find` | qwen | Grep + return match references by default |
+| POST | `/read` | none | Fetch explicit file content after discovery |
 | POST | `/summarize` | qwen | Summarize a single file |
-| POST | `/routes` | qwen | Extract Next.js / FastAPI routes |
-| POST | `/dependencies` | none | Map imports (deterministic) |
+| POST | `/routes` | qwen | Extract Next.js / FastAPI route references |
+| POST | `/dependencies` | none | Map import references (deterministic) |
 | POST | `/diff-summary` | qwen3.5:9b | Risk-annotated diff review |
 
 ### Vector store
@@ -136,7 +137,13 @@ enabled tool or a final answer from accumulated evidence.
 | Method | Path | Model | Description |
 |--------|------|-------|-------------|
 | POST | `/index` | nomic | Embed + upsert code chunks into Supabase |
-| POST | `/vector-search` | nomic | Semantic search across indexed chunks |
+| POST | `/vector-search` | nomic | Semantic search across indexed chunks; returns references by default |
+
+Discovery endpoints default to `detail: "summary"` and return `{id, title,
+type, score, path, summary}` references plus telemetry. Use
+`detail: "standard"` for slightly richer summaries, `detail: "full"` for the
+legacy inline payload, or `mode: "context_safe"` for the smallest Claude-safe
+response. Fetch source content intentionally with `POST /read`.
 
 ### Code generation (mechanical tasks only)
 
@@ -546,7 +553,9 @@ configuration forwards to `http://127.0.0.1:8088` by default.
 
 Primary tools are `investigate_codebase`, `load_context`, `review_diff`, and
 `audit_issue`. Advanced direct tools expose `/scan`, `/find`, `/summarize`,
-`/dependencies`, and `/vector-search`. Orchestrators should prefer
+`/dependencies`, and `/vector-search`. These discovery endpoints are
+reference-first by default; use `/read` or `detail="full"` only when inline
+content is intentional. Orchestrators should prefer
 `investigate_codebase` instead of manually chaining advanced tools.
 
 ---

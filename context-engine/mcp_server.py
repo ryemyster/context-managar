@@ -36,7 +36,19 @@ REQUEST_TIMEOUT = float(os.getenv("CONTEXT_ENGINE_MCP_REQUEST_TIMEOUT", "120"))
 RUN_TIMEOUT = float(os.getenv("CONTEXT_ENGINE_MCP_RUN_TIMEOUT", "900"))
 POLL_INTERVAL = float(os.getenv("CONTEXT_ENGINE_MCP_POLL_INTERVAL", "1"))
 MCP_INLINE_LIMIT = int(os.getenv("MCP_INLINE_LIMIT", "1000"))
-MCP_RESPONSE_MODES = ["auto", "summary", "inline"]
+MCP_RESPONSE_MODES = ["auto", "summary", "inline", "context_safe"]
+DISCOVERY_DETAIL_SCHEMA = {
+    "type": "string",
+    "enum": ["summary", "standard", "full"],
+    "default": "summary",
+    "description": "REST discovery detail. summary returns references; full preserves legacy inline payload.",
+}
+DISCOVERY_LIMIT_SCHEMA = {
+    "type": "integer",
+    "minimum": 1,
+    "maximum": 100,
+    "description": "Maximum discovery references returned by REST.",
+}
 
 CONTROL_PLANE_DESCRIPTION = (
     "Large outputs are written to artifacts. This MCP tool returns references "
@@ -78,7 +90,9 @@ def _schema(
                         "MCP response mode. 'auto' returns a reference when the "
                         "serialized payload exceeds MCP_INLINE_LIMIT. 'summary' "
                         "always returns artifact metadata and a concise summary. "
-                        "'inline' preserves the original full response."
+                        "'inline' preserves the original full response. "
+                        "'context_safe' forwards REST mode='context_safe' "
+                        "and returns an artifact/reference summary when useful."
                     ),
                 },
             },
@@ -233,6 +247,13 @@ TOOLS = [
                 "minLength": 1,
                 "description": "Scoped owner/repo/subpath directory.",
             },
+            "detail": DISCOVERY_DETAIL_SCHEMA,
+            "max_results": DISCOVERY_LIMIT_SCHEMA,
+            "max_chars": {
+                "type": "integer",
+                "minimum": 200,
+                "description": "Approximate REST response byte budget.",
+            },
         },
         ["path"],
     ),
@@ -249,6 +270,13 @@ TOOLS = [
                 "type": "string",
                 "default": ".",
                 "description": "Optional owner/repo/subpath search scope.",
+            },
+            "detail": DISCOVERY_DETAIL_SCHEMA,
+            "max_results": DISCOVERY_LIMIT_SCHEMA,
+            "max_chars": {
+                "type": "integer",
+                "minimum": 200,
+                "description": "Approximate REST response byte budget.",
             },
         },
         ["query"],
@@ -282,6 +310,13 @@ TOOLS = [
                 "minLength": 1,
                 "description": "Scoped owner/repo/subpath.",
             },
+            "detail": DISCOVERY_DETAIL_SCHEMA,
+            "max_results": DISCOVERY_LIMIT_SCHEMA,
+            "max_chars": {
+                "type": "integer",
+                "minimum": 200,
+                "description": "Approximate REST response byte budget.",
+            },
         },
         ["path"],
     ),
@@ -306,6 +341,13 @@ TOOLS = [
                 "maximum": 1,
                 "default": 0.3,
             },
+            "detail": DISCOVERY_DETAIL_SCHEMA,
+            "max_results": DISCOVERY_LIMIT_SCHEMA,
+            "max_chars": {
+                "type": "integer",
+                "minimum": 200,
+                "description": "Approximate REST response byte budget.",
+            },
         },
         ["query"],
     ),
@@ -316,7 +358,15 @@ TOOLS = [
             "Next.js route inventory. Prefer investigate_codebase when routes "
             "must be interpreted with surrounding code evidence."
         ),
-        {},
+        {
+            "detail": DISCOVERY_DETAIL_SCHEMA,
+            "max_results": DISCOVERY_LIMIT_SCHEMA,
+            "max_chars": {
+                "type": "integer",
+                "minimum": 200,
+                "description": "Approximate REST response byte budget.",
+            },
+        },
         [],
     ),
     _schema(
@@ -508,11 +558,17 @@ def _summarize_payload(name: str, payload: dict[str, Any]) -> str:
         status = payload.get("status", "complete")
         return f"Issue audit {status}; {findings} findings."
     if name == "dependency_analysis":
+        if "metadata" in payload:
+            count = payload.get("metadata", {}).get("result_count", len(payload.get("results") or []))
+            return f"Dependency analysis returned {count} reference results."
         internal = len(payload.get("internal") or [])
         external = len(payload.get("external") or [])
         graph = len(payload.get("graph") or {})
         return f"Dependency analysis found {internal} internal imports, {external} external imports, and {graph} graph entries."
     if name == "route_analysis":
+        if "metadata" in payload:
+            count = payload.get("metadata", {}).get("result_count", len(payload.get("results") or []))
+            return f"Route analysis returned {count} reference results."
         routes = len(payload.get("routes") or [])
         api = len(payload.get("api_routes") or [])
         middleware = len(payload.get("middleware") or [])
@@ -604,6 +660,9 @@ def _classify_response(
 def _pop_response_mode(arguments: dict[str, Any]) -> tuple[dict[str, Any], str]:
     rest_arguments = dict(arguments)
     mode = rest_arguments.pop("mode", "auto")
+    if mode == "context_safe":
+        rest_arguments["mode"] = "context_safe"
+        return rest_arguments, "summary"
     if mode not in MCP_RESPONSE_MODES:
         mode = "auto"
     return rest_arguments, mode

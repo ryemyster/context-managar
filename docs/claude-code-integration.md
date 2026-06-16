@@ -72,6 +72,10 @@ Advanced tools are `scan_directory`, `find_in_code`, `summarize_file`,
 retrieval operation. Do not manually chain them when `investigate_codebase` can
 own the investigation.
 
+Discovery tools return compact references by default. Treat their output as an
+index: inspect `path` and `summary`, then fetch exact source content only when
+needed with `/read` or an explicit full-detail tool call.
+
 ## Project Rule
 
 Add this to `CLAUDE.md` or `.claude/rules/context-engine.md`:
