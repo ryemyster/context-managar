@@ -4,19 +4,16 @@
 # Usage:     bash scripts/install-native.sh
 # Uninstall: bash scripts/install-native.sh --uninstall
 #
-# Env vars are baked into the plist at install time — launchd does not source
+# Env vars are baked into the plist at install time; launchd does not source
 # files at runtime. After editing .env, re-run this script to apply changes.
-# OLLAMA_HOST and SUPABASE_URL are always overridden to localhost (native mode).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-PLIST_LABEL="life.ascendvent.context-engine"
+PLIST_LABEL="life.ascendvent.context-manager"
 PLIST_PATH="$HOME/Library/LaunchAgents/${PLIST_LABEL}.plist"
-LOG_DIR="$HOME/Library/Logs/context-engine"
-LOG_OUT="$LOG_DIR/stdout.log"
-LOG_ERR="$LOG_DIR/stderr.log"
+LOG_FILE="$HOME/Library/Logs/context-manager.log"
 VENV="$ROOT/context-engine/.venv"
 PORT=8088
 
@@ -27,25 +24,43 @@ if [[ "${1:-}" == "--uninstall" ]]; then
   rm -f "$PLIST_PATH" && echo "✓ plist removed"
   echo "  venv and logs left in place. Remove manually if wanted:"
   echo "    rm -rf $VENV"
-  echo "    rm -rf $LOG_DIR"
+  echo "    rm -f $LOG_FILE"
   exit 0
 fi
 
 echo "── context-engine native install ───────────────────────"
 
 # ── python ─────────────────────────────────────────────────────────────────────
-PYTHON=$(command -v python3 || true)
+PYTHON=""
+for candidate in python3.13 python3.12 python3; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    path="$(command -v "$candidate")"
+    pyver="$("$path" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")"
+    if [[ "$pyver" == "3.12" || "$pyver" == "3.13" ]]; then
+      PYTHON="$path"
+      break
+    fi
+  fi
+done
 if [[ -z "$PYTHON" ]]; then
-  echo "✗ python3 not found. Install via: brew install python"
+  echo "✗ Python 3.12 or 3.13 not found. Install via: brew install python@3.13"
   exit 1
 fi
 PYVER=$("$PYTHON" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 echo "✓ python $PYVER at $PYTHON"
 
 # ── venv + deps ────────────────────────────────────────────────────────────────
+if [[ -d "$VENV" ]]; then
+  VENV_PYVER=$("$VENV/bin/python" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || true)
+  if [[ "$VENV_PYVER" != "$PYVER" ]]; then
+    echo "→ recreating venv for python $PYVER (was ${VENV_PYVER:-unknown})"
+    rm -rf "$VENV"
+  fi
+fi
+
 if [[ ! -d "$VENV" ]]; then
   echo "→ creating venv at context-engine/.venv"
-  "$PYTHON" -m venv "$VENV"
+  "$PYTHON" -m venv --system-site-packages "$VENV"
 fi
 
 echo "→ installing requirements"
@@ -61,17 +76,17 @@ if [[ ! -f "$ROOT/.env" ]]; then
   echo "  Edit it now, then re-run this script:"
   echo "    $ROOT/.env"
   echo ""
-  echo "  Required changes for native (non-Docker) mode:"
+  echo "  Required configuration:"
   echo "    OLLAMA_HOST=http://localhost:11434"
   echo "    REPO_ROOT=$HOME/Repos"
-  echo "    SUPABASE_URL=http://localhost:54321"
+  echo "    SUPABASE_URL=<your Supabase URL>"
   echo "    SUPABASE_SERVICE_ROLE_KEY=<your key>"
   exit 0
 fi
 
-# ── log dir ────────────────────────────────────────────────────────────────────
-mkdir -p "$LOG_DIR"
-echo "✓ log dir: $LOG_DIR"
+# ── logs ───────────────────────────────────────────────────────────────────────
+mkdir -p "$(dirname "$LOG_FILE")"
+echo "✓ log file: $LOG_FILE"
 
 # ── unload existing ────────────────────────────────────────────────────────────
 if launchctl list "$PLIST_LABEL" &>/dev/null; then
@@ -82,9 +97,9 @@ fi
 # ── build plist — env vars baked in from .env at install time ─────────────────
 # launchd does not source files at runtime; vars must be explicit in the plist.
 # Re-run this script after editing .env to pick up changes.
-# OLLAMA_HOST and SUPABASE_URL are always overridden to localhost (native mode).
 
 env_xml=""
+has_repo_root=0
 while IFS= read -r line || [[ -n "$line" ]]; do
   # skip blanks and comments
   [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
@@ -94,18 +109,20 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   val="${line#*=}"
   # skip placeholder secrets
   [[ "$val" == "your-"* ]] && continue
-  # skip keys we override below for native mode
-  [[ "$key" == "OLLAMA_HOST" || "$key" == "SUPABASE_URL" ]] && continue
+  if [[ "$key" == "REPO_ROOT" ]]; then
+    has_repo_root=1
+    if [[ "$val" == "/repo" ]]; then
+      val="$HOME/Repos"
+    fi
+  fi
   env_xml+="    <key>${key}</key>"$'\n'
   env_xml+="    <string>${val}</string>"$'\n'
 done < "$ROOT/.env"
-
-# Native overrides — always use localhost, never Docker-internal hostnames
-env_xml+="    <key>OLLAMA_HOST</key>"$'\n'
-env_xml+="    <string>http://localhost:11434</string>"$'\n'
-env_xml+="    <key>SUPABASE_URL</key>"$'\n'
-env_xml+="    <string>http://localhost:54321</string>"$'\n'
-echo "✓ native overrides applied (OLLAMA_HOST=localhost:11434, SUPABASE_URL=localhost:54321)"
+if [[ "$has_repo_root" -eq 0 ]]; then
+  env_xml+="    <key>REPO_ROOT</key>"$'\n'
+  env_xml+="    <string>${HOME}/Repos</string>"$'\n'
+fi
+echo "✓ environment loaded from .env"
 
 cat > "$PLIST_PATH" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -139,10 +156,10 @@ cat > "$PLIST_PATH" << PLIST
 ${env_xml}  </dict>
 
   <key>StandardOutPath</key>
-  <string>${LOG_OUT}</string>
+  <string>${LOG_FILE}</string>
 
   <key>StandardErrorPath</key>
-  <string>${LOG_ERR}</string>
+  <string>${LOG_FILE}</string>
 
   <key>KeepAlive</key>
   <true/>
@@ -171,8 +188,7 @@ for i in $(seq 1 20); do
   fi
   if [[ $i -eq 20 ]]; then
     echo "✗ timed out — check logs:"
-    echo "    tail -f $LOG_ERR"
-    echo "    tail -f $LOG_OUT"
+    echo "    tail -f $LOG_FILE"
     exit 1
   fi
   sleep 1
@@ -181,7 +197,7 @@ done
 echo ""
 echo "── done ────────────────────────────────────────────────"
 echo "  API:       http://localhost:${PORT}"
-echo "  Logs:      tail -f $LOG_ERR"
+echo "  Logs:      tail -f $LOG_FILE"
 echo "  Restart:   launchctl kickstart -k gui/$(id -u)/${PLIST_LABEL}"
 echo "  Stop:      launchctl unload $PLIST_PATH"
 echo "  Uninstall: bash scripts/install-native.sh --uninstall"

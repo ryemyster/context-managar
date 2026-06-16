@@ -13,6 +13,7 @@ PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 LOG="$HOME/Library/Logs/context-engine-mcp.log"
 VENV="$ROOT/context-engine/.mcp-venv"
 PYTHON="$VENV/bin/python3"
+PYTHON_BIN=""
 HOST="${CONTEXT_ENGINE_MCP_HOST:-127.0.0.1}"
 PORT="${CONTEXT_ENGINE_MCP_PORT:-8089}"
 MCP_URL="http://${HOST}:${PORT}/mcp"
@@ -26,8 +27,31 @@ if [[ "${1:-}" == "--uninstall" ]]; then
   exit 0
 fi
 
+for candidate in python3.13 python3.12 python3; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    path="$(command -v "$candidate")"
+    pyver="$("$path" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")"
+    if [[ "$pyver" == "3.12" || "$pyver" == "3.13" ]]; then
+      PYTHON_BIN="$path"
+      break
+    fi
+  fi
+done
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo "Python 3.12 or 3.13 not found. Install via: brew install python@3.13" >&2
+  exit 1
+fi
+
+PYVER=$("$PYTHON_BIN" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+if [[ -d "$VENV" ]]; then
+  VENV_PYVER=$("$PYTHON" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || true)
+  if [[ "$VENV_PYVER" != "$PYVER" ]]; then
+    rm -rf "$VENV"
+  fi
+fi
+
 if [[ ! -d "$VENV" ]]; then
-  python3 -m venv "$VENV"
+  "$PYTHON_BIN" -m venv "$VENV"
 fi
 
 "$PYTHON" -m pip install -q -r "$ROOT/context-engine/requirements-mcp.txt"
