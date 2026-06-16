@@ -108,7 +108,7 @@ enabled tool or a final answer from accumulated evidence.
 | GET | `/health` | Full status JSON — always HTTP 200, check `status` field |
 | GET | `/healthcheck` | HTTP 200 `{"ok":true}` or 503 `{"ok":false,"reason":"..."}` |
 | GET | `/debug` | Model loaded, vector row count, output files, config, tips |
-| GET | `/setup` | Live Markdown — any agent reads this to self-configure |
+| GET | `/setup` | Agent usage and integration playbook |
 
 ### Agent delegation (async/poll pattern)
 
@@ -335,11 +335,14 @@ echo "<package>==<version>" >> context-engine/requirements.txt
 
 ### Adding a new endpoint
 
-Four files, always: `models.py` → `markdown_writer.py` → `main.py` (route) → `main.py` (/setup doc).
+Update the request/response models only when the route needs typed input or an
+explicit FastAPI `response_model`. Add a Markdown writer only for endpoints that
+produce durable artifacts. Keep `/setup` updated when endpoint behavior changes
+how agents should discover, narrow, read, or act.
 
-Use the `/endpoint` agent: it scaffolds all four files and the store_artifact wire-up.
-
-**`/setup` is the agent contract.** Every agent that calls this service reads `/setup` cold to understand how to use it. Update it in the same commit as the endpoint.
+**`/setup` is the agent playbook.** Every agent that calls this service reads
+`/setup` cold to understand how to integrate Context Engine into a repository
+and how to avoid unnecessary context consumption.
 
 ---
 

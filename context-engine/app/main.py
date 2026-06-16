@@ -46,9 +46,7 @@ from .models import (
     AgentRunRequest, AgentRunResponse,
     LogLevelRequest, LogLevelResponse,
     ToolCallRequest,
-    HealthResponse, ScanResponse, FindResponse, RoutesResponse,
-    DependenciesResponse, SummarizeResponse, ContextResponse,
-    DiffResponse, VectorSearchResponse, IndexResponse, DraftResponse, ScaffoldResponse, ScaffoldFileResult, IssueAuditResponse,
+    DraftResponse, ScaffoldResponse, ScaffoldFileResult, IssueAuditResponse,
 )
 from . import agent_runner, tool_registry
 from .repo_reader import safe_resolve, read_file, rel_path, walk_repo, build_snippet_block
@@ -308,6 +306,7 @@ async def setup():
     vec_ok   = await supabase_vector.is_available()
     repo     = str(config.REPO_ROOT)
     base     = "http://localhost:8088"
+    mcp_url  = "http://127.0.0.1:8089/mcp"
 
     gen_status = "available" if model_ok else "offline"
     emb_status = "available" if embed_ok else "offline"
@@ -322,6 +321,29 @@ async def setup():
         "Use references first.\n"
         "Retrieve details only when necessary.\n\n"
         "Avoid loading large artifacts into context.\n\n"
+
+        "## Agent Integration\n\n"
+        "Point agents at this endpoint when connecting a repository. The agent should "
+        "read this guide, then update durable project instructions so future coding "
+        "sessions use Context Engine consistently.\n\n"
+        "Preferred MCP transport:\n\n"
+        "```bash\n"
+        f"claude mcp add --scope user --transport http context-engine {mcp_url}\n"
+        f"codex mcp add context-engine --url {mcp_url}\n"
+        "```\n\n"
+        "Recommended repository rule text:\n\n"
+        "```markdown\n"
+        "## Context Engine\n\n"
+        "Use Context Engine for non-trivial repository work. Treat it as a retrieval "
+        "index: discover references first, read only selected files, and keep "
+        "responses in `mode=context_safe` unless exact implementation detail is "
+        "required. Verify source files before editing. Context Engine is read-only; "
+        "the coding agent owns all repository writes and decisions.\n"
+        "```\n\n"
+        "When coding is in play, update the repo's agent-facing files as applicable: "
+        "`AGENTS.md`, `CLAUDE.md`, `.claude/rules/*`, MCP config, slash commands, "
+        "skills, hooks, or local scripts. Keep those integrations aligned with the "
+        "`find -> read -> act` workflow below.\n\n"
 
         "## Recommended Workflow\n\n"
         "### Step 1: Discover\n\n"
@@ -452,280 +474,6 @@ async def setup():
     )
 
 
-@app.get("/setup-legacy", response_class=__import__("fastapi").responses.PlainTextResponse)
-async def setup_legacy():
-    """
-    Agent instruction protocol. Any AI agent can fetch this to understand how to
-    integrate with context-engine. Live state is embedded — no stale docs.
-    Audience: AI agent tools (Claude Code, Cursor, Copilot, custom agents).
-    NOT a setup/install guide — this is an operational integration contract.
-    """
-    models   = await ollama_client.list_models()
-    model_ok = any(config.OLLAMA_MODEL       in m for m in models)
-    embed_ok = any(config.OLLAMA_EMBED_MODEL in m for m in models)
-    vec_ok   = await supabase_vector.is_available()
-    repo     = str(config.REPO_ROOT)
-    base     = "http://localhost:8088"
-    mcp_url  = "http://127.0.0.1:8089/mcp"
-
-    reason_ok  = any(config.OLLAMA_REASON_MODEL in m for m in models)
-    agent_ok   = any(config.OLLAMA_AGENT_MODEL in m for m in models)
-    gen_status    = "available" if model_ok  else "OFFLINE — skip /draft /scaffold /scan /find /summarize"
-    reason_status = "available" if reason_ok else "OFFLINE — /context and /diff-summary will degrade"
-    agent_status  = "available" if agent_ok else "OFFLINE — /agents/run cannot delegate"
-    emb_status    = "available" if embed_ok  else "OFFLINE — skip /index and /vector-search"
-    vec_status    = "ready" if vec_ok else "not indexed — run /index first; /vector-search returns empty until then"
-
-    return (
-        "# context-engine — Agent Integration Protocol\n"
-        f"_repo: `{repo}` · {base}_\n"
-        "\n---\n\n"
-
-        "## Caller contract\n\n"
-        f"Junior dev available at `{base}`.\n"
-        f"Check: `GET /healthcheck` → `{{\"ok\": true}}`\n"
-        f"Troubleshoot: `GET {base}/debug` — model state, vector row count, config. No model calls.\n\n"
-        "**Preferred transport: MCP. REST remains available for scripts, compatibility, and troubleshooting.**\n"
-        "**SR/JR pattern:** you plan, specify, review, apply. The junior investigates and returns evidence.\n"
-        "**The junior is read-only** — it never writes to the repo.\n\n"
-
-        "### Configure the MCP server\n\n"
-        f"The persistent Streamable HTTP MCP service runs at `{mcp_url}` and forwards to REST. "
-        "It contains no planning, verification, scanning, or agent loop logic.\n\n"
-        "MCP is a control plane: large outputs are written to artifacts and MCP returns "
-        "artifact references plus concise summaries by default. Pass `mode=\"inline\"` only "
-        "when the full payload should enter the active conversation; use `mode=\"summary\"` "
-        "to force artifact-reference responses. REST discovery endpoints are also "
-        "reference-first by default; pass `detail=\"full\"` for legacy inline payloads.\n\n"
-        "**Install/restart the launchd service:**\n"
-        "```bash\n"
-        "bash scripts/install-mcp.sh\n"
-        "```\n\n"
-        "**Claude Code:**\n"
-        "```bash\n"
-        f"claude mcp add --scope user --transport http context-engine {mcp_url}\n"
-        "```\n\n"
-        "**Codex:**\n"
-        "```bash\n"
-        f"codex mcp add context-engine --url {mcp_url}\n"
-        "```\n\n"
-        "The MCP launchd service is separate from the REST launchd service. Restarting MCP does not "
-        "restart the Context Engine Agent.\n\n"
-
-        "**Live status:**\n\n"
-        "| Capability | Status |\n"
-        "|---|---|\n"
-        f"| Reasoning model (`{config.OLLAMA_REASON_MODEL}`) | {reason_status} |\n"
-        f"| Agent model (`{config.OLLAMA_AGENT_MODEL}`) | {agent_status} |\n"
-        f"| Code model (`{config.OLLAMA_MODEL}`) | {gen_status} |\n"
-        f"| Embeddings (`{config.OLLAMA_EMBED_MODEL}`) | {emb_status} |\n"
-        f"| Vector index | {vec_status} |\n\n"
-
-        "**MCP decision table:**\n\n"
-        "| Situation | MCP tool |\n"
-        "|---|---|\n"
-        "| Repository investigation, architecture question, or multi-file evidence gathering | `investigate_codebase` — primary/default |\n"
-        "| Gather a bounded pre-task context bundle | `load_context` |\n"
-        "| Review changes after editing | `review_diff` |\n"
-        "| Audit an issue against repository evidence | `audit_issue` |\n"
-        "| One bounded primitive retrieval | Advanced tools: `scan_directory`, `find_in_code`, `summarize_file`, `dependency_analysis`, `vector_search` |\n"
-        "| Novel architecture, security, complex logic | Senior engineer owns the decision; delegate only bounded evidence gathering |\n"
-        "| Engine unreachable | Proceed without it — never block on the scout |\n\n"
-
-        "**Delegation rule:** prefer `investigate_codebase` over manually chaining advanced MCP tools. "
-        "The high-level tool invokes the existing Context Engine Agent, which owns planning, repository "
-        "tool selection, memory search, verification, repair passes, and evidence trails.\n\n"
-
-        f"**Path convention:** `REPO_ROOT` is `{repo}`. All `path` values must use `<owner>/<repo>/` prefix — "
-        "e.g. `\"ascendvent/checkin-ascendvent/src\"`. Never use bare `\".\"` — it scans all of `~/Repos`.\n\n"
-        f"**Skip rule:** one-liner task, files already in context, or `{base}/healthcheck` returns non-200 — state reason explicitly.\n\n"
-        "**Output files:** `~/Library/Application Support/context-store/artifacts/` — "
-        "always verify actual source files before editing; output files are scout reports, not ground truth.\n\n"
-
-        "**MCP tool reference:**\n\n"
-        "- `investigate_codebase(task, tools?, max_iterations?, system_prompt?, allowed_scopes?)` "
-        "calls `/agents/run`, polls status, and returns a summary/reference by default when large.\n"
-        "- `load_context(task, paths?, focus?, use_vector?, mode?)` calls `/context`.\n"
-        "- `review_diff(diff, mode?)` calls `/diff-summary`.\n"
-        "- `audit_issue(task, repo, paths, focus?, requirements?, use_vector?, mode?)` calls the async issue auditor and polls it.\n"
-        "- Advanced direct tools map one-to-one to `/scan`, `/find`, `/summarize`, `/dependencies`, `/routes`, `/draft`, `/scaffold`, and `/vector-search`.\n"
-        "- Large MCP responses include `artifact_id`, `artifact_path`, `artifact_type`, `summary`, `token_estimate`, and `metadata`.\n\n"
-
-        "**REST endpoint reference (compatibility):**\n\n"
-
-        "**POST /agents/run** — delegate any task; returns `run_id` immediately, poll until `status != \"running\"`.\n"
-        "```json\n"
-        '{  "task": "Find all route handlers in ryemyster/context-manager/context-engine/app",\n'
-        '   "tools": [],  "max_iterations": 10,  "allowed_scopes": null  }\n'
-        "```\n"
-        "- `allowed_scopes`: `null` = all; restrict with `[\"repo:read\"]`, `[\"memory:read\"]`, `[\"engine:read\"]`; `update_plan` always available.\n"
-        "Poll response fields:\n"
-        "- `final_answer`, `tool_calls_made` `{name, arguments, result}`, `iterations`\n"
-        "- `stopped_reason`: `\"final_answer\"` | `\"max_iterations\"` | `\"timeout\"` | `\"model_error\"` | `\"verification_failed\"`\n"
-        "- `memory_context_used` (bool), `memory_hits` (int)\n"
-        "- `plan_state` — last `update_plan` call: `{goal, steps, current_step, blockers}`; `{}` if never called\n"
-        "- `verification` — post-hoc coherence check: `{passed: bool|null, rationale: str, unsupported_claims: [str], evidence_gap: bool, repaired?: bool}`;\n"
-        "  populated when `stopped_reason == \"final_answer\"` or `\"verification_failed\"`; `{}` on timeout/max_iterations/model_error;\n"
-        "  `repaired: true` means a repair pass fired and re-verified; "
-        "`{passed: null, error: \"verifier_timeout\"}` means the answer is returned but verification exceeded its ceiling\n\n"
-        "**Agent latency boundaries:**\n"
-        f"- Memory preflight is best-effort and capped at `{config.OLLAMA_AGENT_MEMORY_TIMEOUT:g}s`.\n"
-        f"- Each native tool-calling turn is capped at `{config.OLLAMA_AGENT_CALL_TIMEOUT:g}s`.\n"
-        f"- Structured next-action selection is capped at `{config.OLLAMA_AGENT_SELECT_TIMEOUT:g}s`.\n"
-        f"- Post-run verification is capped at `{config.OLLAMA_AGENT_VERIFY_TIMEOUT:g}s` and degrades without discarding the answer.\n"
-        f"- The complete agent run budget is `{config.OLLAMA_AGENT_TIMEOUT:g}s`; the outer worker guard is defensive only.\n\n"
-        "**Tool-call reliability:** the agent prompt is generated from the tools enabled for that run, so it never "
-        "orders calls to unavailable tools. A response cannot become a final answer before an enabled tool returns evidence. "
-        "The primary loop uses a constrained JSON action schema to choose either one enabled tool or a final answer from accumulated "
-        "evidence. Absolute paths under `REPO_ROOT` are normalized to the required repository-relative contract before execution; "
-        "external absolute paths remain rejected. Repeating an identical successful tool call triggers schema-constrained answer "
-        "synthesis from existing evidence. Native `tool_calls` and valid JSON tool calls embedded in text remain recovery paths.\n\n"
-        "Expected tool call order: `search_memory → update_plan → scan_directory → find_in_code or grep → read_file`\n\n"
-
-        "**GET /agents/tools** — tool manifest (schemas + `scopes` + `side_effects`). "
-        "Tools: `scan_directory`, `find_in_code`, `read_file`, `grep`, `health_check`, `search_memory`, `update_plan`.\n\n"
-
-        "**POST /context** — scan + grep + optional vector + synthesis. "
-        '`{"task": "...", "paths": ["owner/repo/src"], "focus": ["term"]}` → `context-bundle.md`\n\n'
-
-        "**POST /agents/issue-auditor/run** — async evidence-based issue triage; same async/poll pattern. "
-        "Status: `complete` | `insufficient_evidence` | `error`.\n\n"
-
-        "**Discovery detail levels:** `/scan`, `/find`, `/routes`, `/dependencies`, and `/vector-search` "
-        "default to `detail=\"summary\"` and return `{id,title,type,score,path,summary}` references plus "
-        "`metadata` (`result_count`, `payload_bytes`, `estimated_tokens`, `truncated`, `detail_level`). "
-        "Use `detail=\"standard\"` for richer summaries, `detail=\"full\"` for legacy inline payloads, "
-        "or `mode=\"context_safe\"` for the smallest Claude-safe response. Use `/read` to fetch content intentionally.\n\n"
-
-        "**POST /scan** — "
-        '`{"path": "owner/repo/src/app/api"}` → file references + patterns artifact · `scan-<slug>.md`\n\n'
-
-        "**POST /find** — "
-        '`{"query": "rate limiting", "path": "owner/repo/src"}` → match references + synthesis artifact · `find-<slug>.md`\n\n'
-
-        "**POST /read** — "
-        '`{"path": "owner/repo/src/app/api/checkins/route.ts", "max_chars": 12000}` → explicit file content\n\n'
-
-        "**POST /summarize** — "
-        '`{"file": "owner/repo/src/app/api/checkins/route.ts"}` → purpose, deps, risks · `summary-<slug>.md`\n\n'
-
-        "**POST /routes** — "
-        '`{"path": "owner/repo"}` → route references · `routes.md`\n\n'
-
-        "**POST /dependencies** — "
-        '`{"path": "owner/repo/src/lib"}` → import references · `dependencies-<slug>.md`\n\n'
-
-        "**POST /diff-summary** — "
-        f'`{{"diff": "<git diff output>"}}` → summary, risks, test_recommendations · `diff-<hash>.md` '
-        f"(paginate above ~{config.DIFF_MAX_CHARS:,} chars)\n\n"
-
-        "**POST /vector-search** — "
-        '`{"query": "auth session middleware", "limit": 8}` → ranked references · `vector-<slug>.md` (requires `/index`)\n\n'
-
-        "**POST /index** — "
-        '`{"paths": ["owner/repo/src"], "force": false}` — run once per session when code has changed\n\n'
-
-        "**POST /draft** — single-file JR dev delegation. "
-        '`{"task": "...", "file": "owner/repo/src/lib/types.ts", "context_files": [...], "mode": "edit"}` → `draft-<slug>.md`\n\n'
-
-        "**POST /scaffold** — multi-file delegation to preserve context window. "
-        '`{"task": "...", "files": [{"file": "...", "spec": "...", "mode": "create"}], "context_files": [...]}` → `scaffold-<slug>.md` per file\n\n'
-
-        "**GET /log-level** — return current log level: `{\"previous\": \"WARNING\", \"current\": \"WARNING\"}`\n\n"
-        "**POST /log-level** — change log level at runtime without a restart. "
-        '`{"level": "DEBUG"}` → `{"previous": "WARNING", "current": "DEBUG"}`. '
-        "Valid levels: TRACE | DEBUG | INFO | WARNING | ERROR. Changes are in-memory only — reverts on restart.\n\n"
-
-        "\n---\n\n"
-
-        "## Implementation details\n"
-        "> Not intended for agent rule files. Changes here do not affect caller behaviour.\n\n"
-
-        "### Model routing\n\n"
-        "| Model | Role | Called by |\n"
-        "|-------|------|-----------|\n"
-        f"| `{config.OLLAMA_REASON_MODEL}` | Reasoning — judgment, risks, what matters | `/diff-summary` |\n"
-        f"| `{config.OLLAMA_AGENT_SELECT_MODEL}` | Agent selection — schema-constrained tool choice | `/agents/run` before evidence |\n"
-        f"| `{config.OLLAMA_AGENT_MODEL}` | Agent answer — bounded final synthesis | `/agents/run` after evidence |\n"
-        f"| `{config.OLLAMA_AGENT_VERIFY_MODEL}` | Agent verification — schema-constrained evidence check | `/agents/run` verifier |\n"
-        f"| `{config.OLLAMA_MODEL}` | Code — pattern matching, generation, summarisation | `/context`, `/draft`, `/scaffold`, `/scan`, `/find`, `/summarize` |\n"
-        f"| `{config.OLLAMA_EMBED_MODEL}` | Embeddings | `/index`, `/vector-search`, `/context`, agent artifact indexing |\n\n"
-        "**Routing rules:**\n"
-        "- `/diff-summary` uses `generate_reasoning()` with the 9B reasoning model.\n"
-        "- `/agents/run` uses fast schema-constrained 3B selection and verification plus bounded 3B answer generation.\n"
-        "- Agent instructions and call order are derived only from tools enabled for the current run.\n"
-        "- `/context` uses the code model — relevance scoring is pattern matching, not reasoning.\n"
-        "- `/draft` and `/scaffold` use the code model — generating code from a clear spec is pattern matching.\n"
-        "- Native tool calling is an optional fallback, not the primary selection path.\n\n"
-
-        "### Agent verifier + repair pass\n\n"
-        "After every `final_answer` stop, `agent_runner._verify_answer()` calls the schema-constrained agent verifier with the task goal, "
-        "tool evidence (capped at 1500 chars), and final answer. Returns `{passed, rationale, unsupported_claims, evidence_gap}`.\n"
-        f"Verification is capped at {config.OLLAMA_AGENT_VERIFY_TIMEOUT:g}s. On timeout, the completed answer remains available "
-        "with `{passed: null, error: \"verifier_timeout\"}`.\n"
-        "If `passed is False`, `_build_repair_prompt()` injects the unsupported claims as a user message and `_execute_loop()` "
-        "re-runs for up to `AGENT_MAX_REPAIR_ITERATIONS` (default 3) cycles. The result is re-verified; "
-        "`verification[\"repaired\"] = True` marks that a repair occurred. "
-        "If the repair pass also fails, `stopped_reason` becomes `\"verification_failed\"`.\n"
-        "Skipped entirely on `max_iterations`, `timeout`, or `model_error` stops.\n\n"
-        "**Tool result confirmation:** `scan_directory` and `read_file` return `error_type: \"needs_confirmation\"` with a `candidates` "
-        "list when the requested path does not exist — the nearest existing ancestor's children are listed so the model can "
-        "self-correct and retry. Other error types: `path_rejected`, `not_found`, `invalid_input`, `engine_down`, `scope_denied`.\n\n"
-
-        "### Output flow\n\n"
-        "`/context` and agent endpoints write a canonical JSON record, append to `events.jsonl`, render Markdown, "
-        "then optionally embed the record with Ollama and upsert to Supabase. "
-        "The vector store is a rebuildable index; local JSON artifacts are the durable source of truth.\n\n"
-
-        "### Worked examples\n\n"
-        "**MCP agent delegation — primary pattern:**\n"
-        "```\n"
-        "1. investigate_codebase(task=\"Determine whether authentication protects all agent endpoints\")\n"
-        "2. Check tool_calls_made (non-empty = real exploration), plan_state.goal, verification.passed\n"
-        "3. Verify source files before acting on final_answer\n"
-        "```\n\n"
-        "The MCP adapter performs the REST start/poll sequence internally. REST callers may continue "
-        "using `POST /agents/run` and `GET /agents/run/status/{run_id}` unchanged.\n\n"
-        "**Single file delegation (/draft):**\n"
-        "```\n"
-        "1. POST /context  →  read context-bundle.md  →  find target files\n"
-        "2. POST /summarize on target  →  understand current shape\n"
-        "3. POST /draft (spec is clear + mechanical)  →  read draft-*.md  →  apply\n"
-        "4. POST /diff-summary  →  read risks\n"
-        "```\n\n"
-        "**Issue audit:**\n"
-        "```\n"
-        "1. POST /agents/issue-auditor/run  →  {run_id, status: 'running'}\n"
-        "2. GET /agents/issue-auditor/status/{run_id}  →  poll until done\n"
-        "3. Read findings + artifacts.record\n"
-        "4. Verify evidence files before closing or commenting on issues\n"
-        "```\n\n"
-
-        "### Adding to a project\n\n"
-        "**Claude Code — add to `CLAUDE.md` or `.claude/rules/context-engine.md`:**\n"
-        "```markdown\n"
-        "## Context Engine\n\n"
-        "Use the `context-engine` MCP server for non-trivial repository work.\n"
-        "Prefer `investigate_codebase` for repository investigation; do not manually orchestrate "
-        "`scan_directory`, `find_in_code`, or other advanced tools when delegation fits.\n"
-        "Use `load_context` for bounded pre-task context and `review_diff` after edits.\n"
-        "Context Engine is read-only. Verify its evidence and own all file writes and decisions.\n"
-        "```\n\n"
-        "**Codex CLI / Qwen Code — add to `~/.codex/AGENTS.md` or `AGENTS.md` in project root:**\n"
-        "```markdown\n"
-        "## Local Context Engine\n\n"
-        "Use the `context-engine` MCP server as a read-only junior engineer.\n"
-        "For non-trivial repository investigations, call `investigate_codebase` first and let the "
-        "existing agent plan, scan, read, verify, and repair. Use advanced direct tools only for "
-        "bounded primitive retrieval. You own architecture, review, and all file writes.\n\n"
-        f"Live protocol and fallback REST details: GET {base}/setup\n"
-        f"REPO_ROOT is `{repo}`. Every path must include `<owner>/<repo>/` prefix. Never bare `.`.\n\n"
-        "If the MCP server or REST healthcheck is unavailable, continue without it.\n"
-        "```\n"
-        "\n---\n"
-    )
-
-
 # ── Log level ──────────────────────────────────────────────────────────────────
 
 @app.get("/log-level", response_model=LogLevelResponse)
@@ -834,7 +582,7 @@ async def find(req: FindRequest):
     t0 = time.monotonic()
     log.debug("POST /find query=%r path=%s", req.query, req.path or "/")
     detail, max_results, max_chars = limits_for(req)
-    matches = find_in_repo(req.query, req.path, max_results=max_results)
+    matches = find_in_repo(req.query, req.path, max_results=max_results + 1)
 
     # Build snippet block from top matches
     match_snippets: list[tuple[str, str]] = []
@@ -1422,7 +1170,7 @@ async def vector_search(req: VectorSearchRequest):
             available=False,
         )
 
-    matches  = await supabase_vector.search(embedding, limit=max_results, threshold=req.threshold)
+    matches  = await supabase_vector.search(embedding, limit=max_results + 1, threshold=req.threshold)
     written  = mw.write_vector_results(req.query, matches)
 
     log.debug("POST /vector-search done matches=%d dur=%.2fs", len(matches), time.monotonic() - t0)

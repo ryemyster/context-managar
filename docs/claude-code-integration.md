@@ -116,4 +116,4 @@ curl -s -X POST http://localhost:8088/agents/run \
 ```
 
 Use REST for shell automation, diagnostics, or clients without MCP. Fetch
-`GET /setup` for the live MCP and REST contract.
+`GET /setup` for the agent usage and repository integration playbook.

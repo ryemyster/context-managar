@@ -39,5 +39,5 @@ investigate_codebase(
 )
 ```
 
-The live configuration and fallback REST contract are available from
+The live usage and repository integration playbook is available from
 `GET http://localhost:8088/setup`.

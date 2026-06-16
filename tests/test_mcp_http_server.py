@@ -99,13 +99,13 @@ async def test_investigate_codebase_delegates_to_existing_adapter():
         (
             "scan_directory",
             "scan_directory",
-            {"path": "owner/repo/src"},
+            {"path": "owner/repo/src", "detail": "summary", "mode": "auto"},
             {"path": "owner/repo/src"},
         ),
         (
             "find_in_code",
             "find_in_code",
-            {"query": "auth", "path": "."},
+            {"query": "auth", "path": ".", "detail": "summary", "mode": "auto"},
             {"query": "auth"},
         ),
         (
@@ -117,13 +117,13 @@ async def test_investigate_codebase_delegates_to_existing_adapter():
         (
             "dependency_analysis",
             "dependency_analysis",
-            {"path": "owner/repo/src", "mode": "auto"},
+            {"path": "owner/repo/src", "detail": "summary", "mode": "auto"},
             {"path": "owner/repo/src"},
         ),
         (
             "route_analysis",
             "route_analysis",
-            {"mode": "auto"},
+            {"path": ".", "detail": "summary", "mode": "auto"},
             {},
         ),
         (
@@ -152,7 +152,13 @@ async def test_investigate_codebase_delegates_to_existing_adapter():
         (
             "vector_search",
             "vector_search",
-            {"query": "auth", "limit": 8, "threshold": 0.3},
+            {
+                "query": "auth",
+                "limit": 8,
+                "threshold": 0.3,
+                "detail": "summary",
+                "mode": "auto",
+            },
             {"query": "auth"},
         ),
     ],
@@ -173,6 +179,36 @@ async def test_tools_are_thin_adapter_calls(
 
     assert result == {"ok": True}
     call.assert_awaited_once_with(tool_name, arguments)
+
+
+@pytest.mark.asyncio
+async def test_http_advanced_tools_forward_context_safe_options():
+    with patch.object(
+        mcp_http,
+        "_call_tool",
+        new_callable=AsyncMock,
+        return_value={"ok": True},
+    ) as call:
+        result = await mcp_http.find_in_code(
+            query="auth",
+            path="owner/repo/src",
+            mode="context_safe",
+            max_results=5,
+            max_chars=1200,
+        )
+
+    assert result == {"ok": True}
+    call.assert_awaited_once_with(
+        "find_in_code",
+        {
+            "query": "auth",
+            "path": "owner/repo/src",
+            "detail": "summary",
+            "mode": "context_safe",
+            "max_results": 5,
+            "max_chars": 1200,
+        },
+    )
 
 
 @pytest.mark.asyncio

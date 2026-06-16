@@ -359,6 +359,11 @@ TOOLS = [
             "must be interpreted with surrounding code evidence."
         ),
         {
+            "path": {
+                "type": "string",
+                "default": ".",
+                "description": "Optional owner/repo path to scope route extraction.",
+            },
             "detail": DISCOVERY_DETAIL_SCHEMA,
             "max_results": DISCOVERY_LIMIT_SCHEMA,
             "max_chars": {

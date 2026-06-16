@@ -26,6 +26,11 @@ async def test_setup_is_context_safe_operational_playbook():
 
     assert body.startswith("# Context Engine Usage Guide")
     assert "Context Engine is a retrieval system." in body
+    assert "## Agent Integration" in body
+    assert "claude mcp add --scope user --transport http context-engine" in body
+    assert "codex mcp add context-engine --url" in body
+    assert "`AGENTS.md`, `CLAUDE.md`, `.claude/rules/*`, MCP config, slash commands" in body
+    assert "skills, hooks, or local scripts" in body
     assert "Use references first." in body
     assert "Retrieve details only when necessary." in body
     assert "Avoid loading large artifacts into context." in body

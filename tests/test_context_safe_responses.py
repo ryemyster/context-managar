@@ -62,6 +62,24 @@ async def test_find_full_preserves_legacy_payload_with_warning(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_find_truncation_reports_when_more_matches_exist(monkeypatch):
+    monkeypatch.setattr(main, "find_in_repo", lambda *a, **k: [
+        {"path": "owner/repo/a.py", "line_no": 1, "line": "auth"},
+        {"path": "owner/repo/b.py", "line_no": 2, "line": "auth"},
+    ])
+    monkeypatch.setattr(main, "read_file", lambda *a, **k: "auth")
+    monkeypatch.setattr(main.ollama_client, "generate", AsyncMock(return_value="summary"))
+    monkeypatch.setattr(main.mw, "write_find", lambda **k: "/tmp/find.md")
+    monkeypatch.setattr(main.supabase_vector, "store_artifact", AsyncMock(return_value=None))
+
+    response = await main.find(FindRequest(query="auth", path="owner/repo", max_results=1))
+
+    assert len(response["results"]) == 1
+    assert response["metadata"]["result_count"] == 2
+    assert response["metadata"]["truncated"] is True
+
+
+@pytest.mark.asyncio
 async def test_scan_context_safe_applies_small_limits(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "safe_resolve", lambda path: tmp_path)
     monkeypatch.setattr(main, "scan_directory", AsyncMock(return_value={
@@ -132,6 +150,23 @@ async def test_vector_search_summary_omits_chunk_content(monkeypatch):
     assert response["results"][0]["type"] == "vector_match"
     assert "matches" not in response
     assert len(response["results"][0]["summary"]) < 400
+
+
+@pytest.mark.asyncio
+async def test_vector_search_truncation_reports_when_more_matches_exist(monkeypatch):
+    monkeypatch.setattr(main.supabase_vector, "is_available", AsyncMock(return_value=True))
+    monkeypatch.setattr(main.ollama_client, "embed", AsyncMock(return_value=[0.1, 0.2]))
+    monkeypatch.setattr(main.supabase_vector, "search", AsyncMock(return_value=[
+        {"path": "owner/repo/a.py", "chunk": "first", "similarity": 0.9},
+        {"path": "owner/repo/b.py", "chunk": "second", "similarity": 0.8},
+    ]))
+    monkeypatch.setattr(main.mw, "write_vector_results", lambda *a, **k: "/tmp/vector.md")
+
+    response = await main.vector_search(VectorSearchRequest(query="auth", max_results=1))
+
+    assert len(response["results"]) == 1
+    assert response["metadata"]["result_count"] == 2
+    assert response["metadata"]["truncated"] is True
 
 
 @pytest.mark.asyncio

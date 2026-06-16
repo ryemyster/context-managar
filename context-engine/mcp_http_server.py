@@ -148,8 +148,19 @@ async def audit_issue(
         "Prefer investigate_codebase when multiple retrieval steps are needed."
     ),
 )
-async def scan_directory(path: str) -> dict[str, Any]:
-    return await _delegate("scan_directory", {"path": path})
+async def scan_directory(
+    path: str,
+    detail: str = "summary",
+    max_results: int | None = None,
+    max_chars: int | None = None,
+    mode: str = "auto",
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {"path": path, "detail": detail, "mode": mode}
+    if max_results is not None:
+        arguments["max_results"] = max_results
+    if max_chars is not None:
+        arguments["max_chars"] = max_chars
+    return await _delegate("scan_directory", arguments)
 
 
 @mcp.tool(
@@ -159,8 +170,25 @@ async def scan_directory(path: str) -> dict[str, Any]:
         "investigate_codebase when results require interpretation or verification."
     ),
 )
-async def find_in_code(query: str, path: str = ".") -> dict[str, Any]:
-    return await _delegate("find_in_code", {"query": query, "path": path})
+async def find_in_code(
+    query: str,
+    path: str = ".",
+    detail: str = "summary",
+    max_results: int | None = None,
+    max_chars: int | None = None,
+    mode: str = "auto",
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {
+        "query": query,
+        "path": path,
+        "detail": detail,
+        "mode": mode,
+    }
+    if max_results is not None:
+        arguments["max_results"] = max_results
+    if max_chars is not None:
+        arguments["max_chars"] = max_chars
+    return await _delegate("find_in_code", arguments)
 
 
 @mcp.tool(
@@ -181,8 +209,19 @@ async def summarize_file(file: str) -> dict[str, Any]:
         "Prefer investigate_codebase for architectural conclusions."
     ),
 )
-async def dependency_analysis(path: str, mode: str = "auto") -> dict[str, Any]:
-    return await _delegate("dependency_analysis", {"path": path, "mode": mode})
+async def dependency_analysis(
+    path: str,
+    detail: str = "summary",
+    max_results: int | None = None,
+    max_chars: int | None = None,
+    mode: str = "auto",
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {"path": path, "detail": detail, "mode": mode}
+    if max_results is not None:
+        arguments["max_results"] = max_results
+    if max_chars is not None:
+        arguments["max_chars"] = max_chars
+    return await _delegate("dependency_analysis", arguments)
 
 
 @mcp.tool(
@@ -193,8 +232,19 @@ async def dependency_analysis(path: str, mode: str = "auto") -> dict[str, Any]:
         "summaries by default."
     ),
 )
-async def route_analysis(mode: str = "auto") -> dict[str, Any]:
-    return await _delegate("route_analysis", {"mode": mode})
+async def route_analysis(
+    path: str = ".",
+    detail: str = "summary",
+    max_results: int | None = None,
+    max_chars: int | None = None,
+    mode: str = "auto",
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {"path": path, "detail": detail, "mode": mode}
+    if max_results is not None:
+        arguments["max_results"] = max_results
+    if max_chars is not None:
+        arguments["max_chars"] = max_chars
+    return await _delegate("route_analysis", arguments)
 
 
 @mcp.tool(
@@ -260,11 +310,23 @@ async def vector_search(
     query: str,
     limit: int = 8,
     threshold: float = 0.3,
+    detail: str = "summary",
+    max_results: int | None = None,
+    max_chars: int | None = None,
+    mode: str = "auto",
 ) -> dict[str, Any]:
-    return await _delegate(
-        "vector_search",
-        {"query": query, "limit": limit, "threshold": threshold},
-    )
+    arguments: dict[str, Any] = {
+        "query": query,
+        "limit": limit,
+        "threshold": threshold,
+        "detail": detail,
+        "mode": mode,
+    }
+    if max_results is not None:
+        arguments["max_results"] = max_results
+    if max_chars is not None:
+        arguments["max_chars"] = max_chars
+    return await _delegate("vector_search", arguments)
 
 
 if __name__ == "__main__":

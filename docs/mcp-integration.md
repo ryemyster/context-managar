@@ -73,6 +73,9 @@ and return compact references plus `metadata` (`result_count`,
 for richer summaries, and `detail="full"` only for legacy inline payloads.
 Fetch file content deliberately with `POST /read`.
 
+The Streamable HTTP MCP tools expose the same discovery controls: `detail`,
+`mode`, `max_results`, and `max_chars` where applicable.
+
 ## Claude Code
 
 Install or restart the service:
