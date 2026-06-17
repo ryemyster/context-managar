@@ -34,17 +34,19 @@ config/                — Claude Code and Codex MCP configuration examples
 docs/mcp-integration.md — MCP tools, installation, examples, and curl migration
 ```
 
-## Three-model stack
+## Four-model stack
 
-| Model | Env var | Used by |
-|-------|---------|---------|
-| `qwen3.5:9b` | `OLLAMA_REASON_MODEL` | `/diff-summary` |
-| `qwen2.5-coder:3b` | `OLLAMA_AGENT_MODEL` | `/agents/run` answer generation |
-| `qwen2.5-coder:3b` | `OLLAMA_AGENT_SELECT_MODEL` / `OLLAMA_AGENT_VERIFY_MODEL` | `/agents/run` structured selection and verification |
-| `qwen2.5-coder:3b` | `OLLAMA_MODEL` | `/context`, `/draft`, `/scaffold`, `/scan`, `/find`, `/summarize` |
-| `nomic-embed-text` | `OLLAMA_EMBED_MODEL` | `/index`, `/vector-search`, `/context` (vector step) |
+| Model | Env var | Timeout | Used by |
+|-------|---------|---------|---------|
+| `qwen3.5:9b` | `OLLAMA_REASON_MODEL` | 600s | `/diff-summary` |
+| `qwen3:4b` | `OLLAMA_ARCH_MODEL` / `OLLAMA_AGENT_MODEL` | 650s/call, 3000s total | `/agents/run` answer generation (multi-turn) |
+| `qwen2.5-coder:3b` | `OLLAMA_AGENT_SELECT_MODEL` / `OLLAMA_AGENT_VERIFY_MODEL` | 45s / 60s | `/agents/run` structured selection and verification |
+| `qwen2.5-coder:3b` | `OLLAMA_MODEL` | 150s | `/context`, `/draft`, `/scaffold`, `/scan`, `/find`, `/summarize` |
+| `nomic-embed-text` | `OLLAMA_EMBED_MODEL` | — | `/index`, `/vector-search`, `/context` (vector step) |
 
-**Routing rule:** `/diff-summary` → `generate_reasoning()` (risk analysis is judgment). Everything else → `generate()` (code pattern matching) or `embed()`. `/context` uses code model for synthesis — relevance scoring is pattern matching, not reasoning.
+Timeouts are set to benchmark max × 1.1 (upper bound + 10% headroom). Benchmarked on Apple Silicon M-series.
+
+**Routing rule:** `/diff-summary` → `generate_reasoning()` (risk analysis is judgment). `/agents/run` answer generation → `generate()` with `qwen3:4b` (architecture review workload). Everything else → `generate()` with `qwen2.5-coder:3b` or `embed()`. `/context` uses code model for synthesis — relevance scoring is pattern matching, not reasoning.
 
 ## Service management (launchd)
 
@@ -72,13 +74,21 @@ bash scripts/install-mcp.sh
 
 ## Logs
 
-All stdout and stderr go to `~/Library/Logs/context-manager.log`.
+Two services, two log files:
+
+| Service | Log file |
+|---|---|
+| REST API (`:8088`) | `~/Library/Logs/context-manager.log` |
+| MCP transport (`:8089/mcp`) | `~/Library/Logs/context-engine-mcp.log` |
 
 ```bash
-# Follow live
+# Follow REST API live
 tail -f ~/Library/Logs/context-manager.log
 
-# Last 50 lines
+# Follow MCP transport live
+tail -f ~/Library/Logs/context-engine-mcp.log
+
+# Last 50 lines (REST)
 tail -50 ~/Library/Logs/context-manager.log
 
 # Filter errors only
@@ -98,6 +108,12 @@ Key lines to look for:
 - `store_artifact done` — artifact indexed to Supabase successfully
 - `store_artifact failed` — background indexing error (non-fatal)
 - `SLOW` — request exceeded `SLOW_REQUEST_MS` threshold (default 5s)
+
+> **If `tail -f` reports "No such file or directory":** newsyslog rotated the log but launchd cannot reopen its stdout/stderr fd. Restart the service to recreate the file:
+> ```bash
+> launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+> launchctl load  ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+> ```
 
 ### Log rotation (newsyslog)
 

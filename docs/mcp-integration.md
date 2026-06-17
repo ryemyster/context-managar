@@ -71,7 +71,10 @@ and return compact references plus `metadata` (`result_count`,
 `payload_bytes`, `estimated_tokens`, `truncated`, `detail_level`). Use
 `mode="context_safe"` for the smallest Claude-safe payload, `detail="standard"`
 for richer summaries, and `detail="full"` only for legacy inline payloads.
-Fetch file content deliberately with `POST /read`.
+Use the two-call fallback for thin discovery results: call with
+`mode="context_safe"` first, then make one re-call without the mode flag when
+the result has too few hits, low-content summaries, or insufficient evidence to
+narrow the next read. Fetch file content deliberately with `POST /read`.
 
 The Streamable HTTP MCP tools expose the same discovery controls: `detail`,
 `mode`, `max_results`, and `max_chars` where applicable.

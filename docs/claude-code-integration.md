@@ -74,7 +74,10 @@ own the investigation.
 
 Discovery tools return compact references by default. Treat their output as an
 index: inspect `path` and `summary`, then fetch exact source content only when
-needed with `/read` or an explicit full-detail tool call.
+needed with `/read` or an explicit full-detail tool call. For advanced direct
+discovery, use `mode=context_safe` first; if the result is thin, has too few
+hits, or lacks enough content to choose the next read, make one re-call without
+the mode flag before escalating to broader reading.
 
 ## Project Rule
 
@@ -87,6 +90,8 @@ Use the `context-engine` MCP server for non-trivial repository work.
 Prefer `investigate_codebase` for repository investigation; do not manually
 orchestrate advanced retrieval tools when delegation fits.
 Use `load_context` for bounded pre-task context and `review_diff` after edits.
+For advanced direct discovery, use `mode=context_safe` first; if results are
+thin, make one re-call without the mode flag before broadening reads.
 Context Engine is read-only. Verify its evidence and own all file writes and
 decisions. If the service is unavailable, continue without it.
 ```

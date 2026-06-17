@@ -142,13 +142,21 @@ The service will not restart on login until you `launchctl load` it again. The p
 
 ## Logs
 
-All stdout and stderr go to `~/Library/Logs/context-manager.log`.
+Two services, two log files:
+
+| Service | Log file |
+|---|---|
+| REST API (`:8088`) | `~/Library/Logs/context-manager.log` |
+| MCP transport (`:8089/mcp`) | `~/Library/Logs/context-engine-mcp.log` |
 
 ```bash
-# Follow live
+# Follow REST API live
 tail -f ~/Library/Logs/context-manager.log
 
-# Last 50 lines
+# Follow MCP transport live
+tail -f ~/Library/Logs/context-engine-mcp.log
+
+# Last 50 lines (REST)
 tail -50 ~/Library/Logs/context-manager.log
 
 # Errors and warnings only
@@ -161,6 +169,12 @@ tail -f ~/Library/Logs/context-manager.log | grep "/find\|/context\|/scan"
 grep "context-engine starting\|context-engine ready\|repo_root\|supabase=" \
   ~/Library/Logs/context-manager.log | tail -10
 ```
+
+> **If `tail -f` reports "No such file or directory":** newsyslog rotated the log but launchd cannot reopen its stdout/stderr file descriptor. Restart the service to recreate the file:
+> ```bash
+> launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+> launchctl load  ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+> ```
 
 ### Log format
 

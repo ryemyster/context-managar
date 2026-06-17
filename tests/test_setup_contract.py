@@ -43,5 +43,8 @@ async def test_setup_is_context_safe_operational_playbook():
     assert "scan everything -> read everything -> act" in body
     assert "Small task: 1-3 artifacts" in body
     assert "mode=context_safe" in body
+    assert "two-call fallback" in body
+    assert "make one re-call without the mode flag" in body
+    assert "If the result is thin" in body
     assert "Token-Saving Rationale" in body
     assert f"Code model (`{config.OLLAMA_MODEL}`) | available" in body

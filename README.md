@@ -143,7 +143,10 @@ Discovery endpoints default to `detail: "summary"` and return `{id, title,
 type, score, path, summary}` references plus telemetry. Use
 `detail: "standard"` for slightly richer summaries, `detail: "full"` for the
 legacy inline payload, or `mode: "context_safe"` for the smallest Claude-safe
-response. Fetch source content intentionally with `POST /read`.
+response. Use the two-call fallback for thin discovery results: call with
+`mode: "context_safe"` first, then make one re-call without the mode flag when the
+result has too few hits, low-content summaries, or insufficient evidence to
+narrow the next read. Fetch source content intentionally with `POST /read`.
 
 ### Code generation (mechanical tasks only)
 

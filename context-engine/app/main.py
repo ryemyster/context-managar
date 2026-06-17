@@ -31,6 +31,7 @@ async def lifespan(app: FastAPI):
     log.info("  repo_root=%s", config.REPO_ROOT)
     log.info("  ollama=%s  model=%s", config.OLLAMA_HOST, config.OLLAMA_MODEL)
     log.info("  reason_model=%s", config.OLLAMA_REASON_MODEL)
+    log.info("  arch_model=%s", config.OLLAMA_ARCH_MODEL)
     log.info("  agent_model=%s", config.OLLAMA_AGENT_MODEL)
     log.info("  embed_model=%s", config.OLLAMA_EMBED_MODEL)
     log.info("  supabase=%s", config.SUPABASE_URL or "not configured")
@@ -131,6 +132,7 @@ async def health():
     models         = await ollama_client.list_models()
     model_ok       = any(config.OLLAMA_MODEL        in m for m in models)
     reason_ok      = any(config.OLLAMA_REASON_MODEL in m for m in models)
+    arch_ok        = any(config.OLLAMA_ARCH_MODEL   in m for m in models)
     agent_ok       = any(config.OLLAMA_AGENT_MODEL  in m for m in models)
     embed_ok       = any(config.OLLAMA_EMBED_MODEL  in m for m in models)
     supabase_ok    = await supabase_vector.is_supabase_reachable()
@@ -150,6 +152,8 @@ async def health():
         "code_model_available":   model_ok,
         "reason_model":           config.OLLAMA_REASON_MODEL,
         "reason_model_available": reason_ok,
+        "arch_model":             config.OLLAMA_ARCH_MODEL,
+        "arch_model_available":   arch_ok,
         "agent_model":            config.OLLAMA_AGENT_MODEL,
         "agent_model_available":  agent_ok,
         "embed_model":            config.OLLAMA_EMBED_MODEL,
@@ -300,17 +304,21 @@ async def setup():
     This endpoint is intentionally context-safe: it teaches retrieval behavior
     without embedding a full configuration manual into the caller's session.
     """
-    models   = await ollama_client.list_models()
-    model_ok = any(config.OLLAMA_MODEL       in m for m in models)
-    embed_ok = any(config.OLLAMA_EMBED_MODEL in m for m in models)
-    vec_ok   = await supabase_vector.is_available()
-    repo     = str(config.REPO_ROOT)
-    base     = "http://localhost:8088"
-    mcp_url  = "http://127.0.0.1:8089/mcp"
+    models     = await ollama_client.list_models()
+    model_ok   = any(config.OLLAMA_MODEL       in m for m in models)
+    arch_ok    = any(config.OLLAMA_ARCH_MODEL   in m for m in models)
+    reason_ok  = any(config.OLLAMA_REASON_MODEL in m for m in models)
+    embed_ok   = any(config.OLLAMA_EMBED_MODEL  in m for m in models)
+    vec_ok     = await supabase_vector.is_available()
+    repo       = str(config.REPO_ROOT)
+    base       = "http://localhost:8088"
+    mcp_url    = "http://127.0.0.1:8089/mcp"
 
-    gen_status = "available" if model_ok else "offline"
-    emb_status = "available" if embed_ok else "offline"
-    vec_status = "ready" if vec_ok else "not indexed"
+    gen_status    = "available" if model_ok  else "offline"
+    arch_status   = "available" if arch_ok   else "offline"
+    reason_status = "available" if reason_ok else "offline"
+    emb_status    = "available" if embed_ok  else "offline"
+    vec_status    = "ready"     if vec_ok    else "not indexed"
 
     return (
         "# Context Engine Usage Guide\n\n"
@@ -337,7 +345,9 @@ async def setup():
         "Use Context Engine for non-trivial repository work. Treat it as a retrieval "
         "index: discover references first, read only selected files, and keep "
         "responses in `mode=context_safe` unless exact implementation detail is "
-        "required. Verify source files before editing. Context Engine is read-only; "
+        "required. If a discovery result is thin, has too few hits, or lacks "
+        "enough content to choose the next read, make one re-call without the mode flag "
+        "before broadening reads. Verify source files before editing. Context Engine is read-only; "
         "the coding agent owns all repository writes and decisions.\n"
         "```\n\n"
         "When coding is in play, update the repo's agent-facing files as applicable: "
@@ -433,21 +443,27 @@ async def setup():
         "```text\n"
         "mode=context_safe\n"
         "```\n\n"
-        "unless detailed implementation work requires otherwise.\n\n"
+        "unless detailed implementation work requires otherwise. Use the two-call "
+        "fallback for thin discovery results: call with `mode=context_safe` first, "
+        "then make one re-call without the mode flag when the result has too few hits, "
+        "low-content summaries, or insufficient evidence to narrow the next read.\n\n"
 
         "## Example Workflows\n\n"
         "Bug fix:\n\n"
         "1. `/find` with `mode=context_safe` for the failing symbol or error text.\n"
+        "   If the result is thin, make one re-call without the mode flag before reading broadly.\n"
         "2. Narrow to 1-3 candidate files using paths, summaries, scores, and metadata.\n"
         "3. `/read` only those files with a bounded `max_chars`.\n"
         "4. Make the fix, then use `/diff-summary` for risk review.\n\n"
         "Architecture question:\n\n"
         "1. `/dependencies` or `/routes` with `mode=context_safe` on the smallest relevant path.\n"
+        "   If the result is thin, make one re-call without the mode flag before expanding scope.\n"
         "2. Use returned references to choose the subsystem boundary.\n"
         "3. `/read` only the entry points and directly related files.\n"
         "4. Refresh discovery if the evidence points to a different subsystem.\n\n"
         "Semantic lookup:\n\n"
         "1. `/vector-search` with a narrow query, low `limit`, and `mode=context_safe`.\n"
+        "   If matches are too sparse or summaries lack enough content, make one re-call without the mode flag.\n"
         "2. Compare summaries and scores.\n"
         "3. `/read` the top matching artifact only when exact code or prose is required.\n\n"
 
@@ -465,12 +481,51 @@ async def setup():
         "candidate discovery, then spend context only on the few artifacts needed "
         "for judgment or implementation.\n\n"
 
+        "## Timing Reference\n\n"
+        "Benchmarked on Apple Silicon (M-series, local Ollama). All estimates are "
+        "from real benchmark runs. Timeouts are set to benchmark max × 1.1 (upper bound + 10% headroom). "
+        "Variance is high — thermal state, memory pressure, and model-swap overhead can shift wall time 2–3×. "
+        "Always poll async endpoints; never assume synchronous completion.\n\n"
+        "**Three-tier model routing:**\n\n"
+        "| Tier | Model | Workload | Benchmark range | Timeout |\n"
+        "|---|---|---|---|---|\n"
+        f"| Default | `{config.OLLAMA_MODEL}` | Code reading, pattern matching, grep synthesis | <1s–123s | {int(config.OLLAMA_TIMEOUT)}s |\n"
+        f"| Architecture review | `{config.OLLAMA_ARCH_MODEL}` | Structural analysis, design review, cross-repo reasoning, agent runs | 10s–563s | {int(config.OLLAMA_ARCH_TIMEOUT)}s |\n"
+        f"| Deep reasoning | `{config.OLLAMA_REASON_MODEL}` | Risk analysis, governance, organizational reasoning | 1s–520s | {int(config.OLLAMA_REASON_TIMEOUT)}s |\n"
+        f"| Embeddings | `{config.OLLAMA_EMBED_MODEL}` | Semantic search indexing | 2–5s (+30s if code model loaded) | — |\n\n"
+        "**Workload classes:**\n\n"
+        "Interactive (expect <2 min, safe to await synchronously):\n"
+        "`/scan` `/find` `/routes` `/dependencies` `/vector-search` `/summarize`\n\n"
+        "Background (fire-and-poll via `run_id`):\n"
+        "`/agents/run` `/agents/issue-auditor/run` `/diff-summary` — deep architecture review, large repository analysis, governance review\n\n"
+        "**Per-endpoint wall-clock budget:**\n\n"
+        "| Endpoint | Model tier | Typical | Hard timeout | Notes |\n"
+        "|---|---|---|---|---|\n"
+        "| `/health` `/healthcheck` `/setup` | none | <1s | — | Always fast |\n"
+        f"| `/vector-search` | embed | 2–5s | — | +30s if `{config.OLLAMA_MODEL}` is loaded |\n"
+        f"| `/scan` `/find` | default (`{config.OLLAMA_MODEL}`) | <30s | {int(config.OLLAMA_TIMEOUT)}s | Interactive |\n"
+        f"| `/routes` `/dependencies` | default (`{config.OLLAMA_MODEL}`) | <30s | {int(config.OLLAMA_TIMEOUT)}s | Interactive |\n"
+        f"| `/summarize` `/context` `/draft` `/scaffold` | default (`{config.OLLAMA_MODEL}`) | <2 min | {int(config.OLLAMA_TIMEOUT)}s | Interactive |\n"
+        f"| `/diff-summary` | deep reasoning (`{config.OLLAMA_REASON_MODEL}`) | 4–9 min | {int(config.OLLAMA_REASON_TIMEOUT)}s | Background; poll or fire-and-forget |\n"
+        f"| `/agents/run` | arch review (`{config.OLLAMA_ARCH_MODEL}`, multi-turn) | 10–50 min | {int(config.OLLAMA_AGENT_TIMEOUT)}s total / {int(config.OLLAMA_AGENT_CALL_TIMEOUT)}s per call | Background; poll `/agents/run/status/{{run_id}}` every 10–30s |\n"
+        f"| `/agents/issue-auditor/run` | arch review (`{config.OLLAMA_ARCH_MODEL}`, multi-turn) | 10–50 min | {int(config.OLLAMA_AGENT_TIMEOUT)}s total / {int(config.OLLAMA_AGENT_CALL_TIMEOUT)}s per call | Background; same loop as `/agents/run` |\n\n"
+        "**Rules for orchestrators (Claude, Codex, GPT, Agy):**\n\n"
+        "- Interactive endpoints: await directly, expect <2 min.\n"
+        "- Background endpoints: fire and poll. Never block your context on them.\n"
+        f"- Agent runs: submit, get `run_id`, poll `/agents/run/status/{{run_id}}` every 10–30s. Total budget is {int(config.OLLAMA_AGENT_TIMEOUT)}s ({int(config.OLLAMA_AGENT_TIMEOUT)//60} min); each model call may take up to {int(config.OLLAMA_AGENT_CALL_TIMEOUT)}s.\n"
+        "- Select and verify steps inside agent runs use the fast default model — only answer generation uses the arch model.\n"
+        "- After any long call, budget an extra 30s before calling `/vector-search` — embed model needs to swap in.\n"
+        "- First call of a session is slowest — cold model load adds 20–60s on top of generation.\n"
+        "- If a call exceeds its timeout, the server returns a 504 or partial result with `stopped_reason: timeout`. Treat that as a signal to retry with a narrower task, not to increase client timeout.\n\n"
+
         "## Live Status\n\n"
-        "| Capability | Status |\n"
-        "|---|---|\n"
-        f"| Code model (`{config.OLLAMA_MODEL}`) | {gen_status} |\n"
-        f"| Embeddings (`{config.OLLAMA_EMBED_MODEL}`) | {emb_status} |\n"
-        f"| Vector index | {vec_status} |\n"
+        "| Capability | Model | Status |\n"
+        "|---|---|---|\n"
+        f"| Code model (default, interactive) | `{config.OLLAMA_MODEL}` | {gen_status} |\n"
+        f"| Arch review model (agent runs) | `{config.OLLAMA_ARCH_MODEL}` | {arch_status} |\n"
+        f"| Deep reasoning (`/diff-summary`) | `{config.OLLAMA_REASON_MODEL}` | {reason_status} |\n"
+        f"| Embeddings | `{config.OLLAMA_EMBED_MODEL}` | {emb_status} |\n"
+        f"| Vector index | — | {vec_status} |\n"
     )
 
 

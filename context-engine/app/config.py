@@ -10,22 +10,25 @@ from pathlib import Path
 OLLAMA_HOST         = os.getenv("OLLAMA_HOST",         "http://founderos-ollama:11434")
 OLLAMA_MODEL        = os.getenv("OLLAMA_MODEL",        "qwen2.5-coder:3b")
 OLLAMA_REASON_MODEL = os.getenv("OLLAMA_REASON_MODEL", "qwen3.5:9b")
-OLLAMA_AGENT_MODEL  = os.getenv("OLLAMA_AGENT_MODEL",  OLLAMA_MODEL)
+OLLAMA_ARCH_MODEL   = os.getenv("OLLAMA_ARCH_MODEL",   "qwen3:4b")
+OLLAMA_AGENT_MODEL  = os.getenv("OLLAMA_AGENT_MODEL",  OLLAMA_ARCH_MODEL)
 OLLAMA_AGENT_SELECT_MODEL = os.getenv("OLLAMA_AGENT_SELECT_MODEL", OLLAMA_MODEL)
 OLLAMA_AGENT_VERIFY_MODEL = os.getenv("OLLAMA_AGENT_VERIFY_MODEL", OLLAMA_MODEL)
 OLLAMA_EMBED_MODEL  = os.getenv("OLLAMA_EMBED_MODEL",  "nomic-embed-text")
 
-# Inference settings — tuned for 3b code model (~3.6s) / 9b reasoning on M3 16GB
-OLLAMA_TIMEOUT        = 120.0   # seconds; 3b on M3 completes in ~3-15s typical
-OLLAMA_REASON_TIMEOUT = 1200.0  # qwen3.5:9b benchmarks at 14m33s on M3 — 20 min covers cold-load + generation
+# Inference timeouts — set to benchmark max × 1.1 (upper bound + 10% headroom)
+# Benchmarked on Apple Silicon M-series, local Ollama, extended timeout runs
+OLLAMA_TIMEOUT        = 150.0   # qwen2.5-coder:3b max observed 122.8s × 1.1 = 135s → 150s
+OLLAMA_REASON_TIMEOUT = 600.0   # qwen3.5:9b max observed 519.3s × 1.1 = 571s → 600s
+OLLAMA_ARCH_TIMEOUT   = float(os.getenv("OLLAMA_ARCH_TIMEOUT", "650.0"))  # qwen3:4b max observed 562.6s × 1.1 = 619s → 650s
 OLLAMA_NUM_CTX        = 4096    # 3b at 4096 ctx = ~2.4GB total — fine on 16GB M3
 OLLAMA_NUM_PREDICT    = 400     # max output tokens for code model
 OLLAMA_REASON_PREDICT = 1024    # reasoning model needs room for chain-of-thought
 
-# Agentic loop settings
-OLLAMA_AGENT_TIMEOUT        = float(os.getenv("OLLAMA_AGENT_TIMEOUT",        "600.0"))  # 10 min total wall-clock budget per agent run
-OLLAMA_AGENT_CALL_TIMEOUT   = float(os.getenv("OLLAMA_AGENT_CALL_TIMEOUT",   "90.0"))   # each model turn must leave time for tools and verification
-OLLAMA_AGENT_SELECT_TIMEOUT = float(os.getenv("OLLAMA_AGENT_SELECT_TIMEOUT", "45.0"))   # schema-constrained next-action selection
+# Agentic loop settings — tuned for qwen3:4b agent model (select/verify stay on 3b fast path)
+OLLAMA_AGENT_TIMEOUT        = float(os.getenv("OLLAMA_AGENT_TIMEOUT",        "3000.0")) # 50 min total: covers ~4 deep qwen3:4b turns with tool calls
+OLLAMA_AGENT_CALL_TIMEOUT   = float(os.getenv("OLLAMA_AGENT_CALL_TIMEOUT",   "650.0"))  # per-call limit matches OLLAMA_ARCH_TIMEOUT (qwen3:4b worst case)
+OLLAMA_AGENT_SELECT_TIMEOUT = float(os.getenv("OLLAMA_AGENT_SELECT_TIMEOUT", "45.0"))   # schema-constrained next-action selection (3b, always fast)
 OLLAMA_AGENT_MEMORY_TIMEOUT = float(os.getenv("OLLAMA_AGENT_MEMORY_TIMEOUT", "10.0"))   # memory is useful but must not block the agent
 OLLAMA_AGENT_VERIFY_TIMEOUT = float(os.getenv("OLLAMA_AGENT_VERIFY_TIMEOUT", "60.0"))   # verification degrades gracefully when reasoning is slow
 OLLAMA_AGENT_NUM_PREDICT    = int(os.getenv("OLLAMA_AGENT_NUM_PREDICT",      "400"))    # bound each tool-selection/final-answer response

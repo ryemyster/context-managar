@@ -22,7 +22,10 @@ Treat `scan_directory`, `find_in_code`, `summarize_file`,
 `dependency_analysis`, and `vector_search` as advanced direct tools. Do not
 manually orchestrate them when `investigate_codebase` can own the investigation.
 Discovery results are references first. Read only the specific files needed for
-the task after reviewing returned paths and summaries.
+the task after reviewing returned paths and summaries. For advanced direct
+discovery, use `mode=context_safe` first; if the result is thin, has too few
+hits, or lacks enough content to choose the next read, make one re-call without
+the mode flag before escalating to broader reading.
 
 Context Engine never writes to the repository. Verify cited source files before
 acting. The senior engineer owns architecture, security decisions, code edits,

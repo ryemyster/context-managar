@@ -151,20 +151,29 @@ async def build_context(
         except Exception:
             continue
 
-        files = walk_repo(base)
-        discovered_files.extend(rel_path(f) for f in files)
-        limit = max(1, config.MAX_FILES_PER_SCAN // max(1, len(paths)))
-        for f in files[:limit]:
-            content = read_file(f)
+        if base.is_file():
+            content = read_file(base)
             if content:
-                rp = rel_path(f)
+                rp = rel_path(base)
+                discovered_files.append(rp)
                 all_files.append(rp)
                 snippets.append((rp, content))
+        else:
+            files = walk_repo(base)
+            discovered_files.extend(rel_path(f) for f in files)
+            limit = max(1, config.MAX_FILES_PER_SCAN // max(1, len(paths)))
+            for f in files[:limit]:
+                content = read_file(f)
+                if content:
+                    rp = rel_path(f)
+                    all_files.append(rp)
+                    snippets.append((rp, content))
 
     if not snippets:
         raise ValueError(
-            "no valid paths produced content — all paths were skipped or unresolvable. "
-            "Paths must be scoped to a subdirectory (e.g. 'owner/repo/src'), not '.' or '/'."
+            "no valid paths produced content — all paths were skipped, unresolvable, or empty. "
+            "Paths must use the owner/repo/ prefix (e.g. 'owner/repo/src' or 'owner/repo/file.py'). "
+            "Bare '.' or '/' are rejected."
         )
 
     # ── 2. Focus term grep ────────────────────────────────────────────────────
