@@ -59,6 +59,9 @@ Advanced direct tools:
 | `find_in_code` | `POST /find` |
 | `summarize_file` | `POST /summarize` |
 | `dependency_analysis` | `POST /dependencies` |
+| `route_analysis` | `POST /routes` |
+| `draft_file` | `POST /draft` |
+| `scaffold_files` | `POST /scaffold` |
 | `vector_search` | `POST /vector-search` |
 
 Prefer `investigate_codebase` over manually chaining advanced tools. Advanced
@@ -127,7 +130,7 @@ The MCP launchd service accepts:
 | Variable | Default | Purpose |
 |---|---|---|
 | `CONTEXT_ENGINE_URL` | `http://localhost:8088` | Existing REST service |
-| `CONTEXT_ENGINE_API_KEY` | empty | Sent as `X-API-Key` when configured |
+| `CONTEXT_ENGINE_API_KEY` | empty | Adapter supports sending it as `X-API-Key`; current launchd installer does not persist it |
 | `CONTEXT_ENGINE_MCP_HOST` | `127.0.0.1` | MCP bind address |
 | `CONTEXT_ENGINE_MCP_PORT` | `8089` | MCP service port |
 | `CONTEXT_ENGINE_MCP_REQUEST_TIMEOUT` | `120` | Individual REST request timeout in seconds |
@@ -135,6 +138,12 @@ The MCP launchd service accepts:
 | `CONTEXT_ENGINE_MCP_POLL_INTERVAL` | `1` | Poll interval in seconds |
 | `OUTPUT_DIR` | `~/Library/Application Support/context-store/artifacts` | Artifact store used for MCP summary/reference records |
 | `MCP_INLINE_LIMIT` | `1000` | Serialized payload byte limit before `mode="auto"` returns an artifact reference |
+
+`mcp_server.py` reads `CONTEXT_ENGINE_API_KEY` and forwards it correctly.
+However, `scripts/install-mcp.sh` currently omits that variable from the
+generated launchd plist. The persistent MCP service therefore cannot call an
+authenticated REST service until the installer is updated or the plist is
+modified explicitly. The default MCP bind address remains loopback-only.
 
 ## Response Modes
 

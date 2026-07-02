@@ -43,11 +43,11 @@ Start with one cloud coding model for every generation role:
 INFERENCE_GENERATION_PROVIDER=openai_compatible
 INFERENCE_GENERATION_ENDPOINT=https://provider.example/v1
 INFERENCE_GENERATION_API_KEY=<stored as a Fly secret>
-INFERENCE_FAST_MODEL=qwen3-coder-next
-INFERENCE_REASONING_MODEL=qwen3-coder-next
-INFERENCE_AGENT_MODEL=qwen3-coder-next
-INFERENCE_SELECTION_MODEL=qwen3-coder-next
-INFERENCE_VERIFICATION_MODEL=qwen3-coder-next
+INFERENCE_FAST_MODEL=<served-model-id>
+INFERENCE_REASONING_MODEL=<served-model-id>
+INFERENCE_AGENT_MODEL=<served-model-id>
+INFERENCE_SELECTION_MODEL=<served-model-id>
+INFERENCE_VERIFICATION_MODEL=<served-model-id>
 OLLAMA_NUM_CTX=32768
 ```
 
@@ -62,7 +62,10 @@ INFERENCE_EMBEDDING_MODEL=nomic-embed-text
 
 Use the exact generation model identifier returned by `GET /models`. The
 generation provider must support OpenAI-compatible tool calls and JSON Schema
-response formatting.
+response formatting. Context Engine currently uses one generation endpoint, so
+all configured role models must be served by that endpoint. See
+[Runpod model selection](runpod-mcp-ollama.md#model-selection-by-context-engine-role)
+for researched recommendations.
 
 ## Repository Storage and Synchronization
 
@@ -154,11 +157,11 @@ primary_region = "<region>"
   LOG_FORMAT = "json"
   INFERENCE_GENERATION_PROVIDER = "openai_compatible"
   INFERENCE_GENERATION_ENDPOINT = "https://provider.example/v1"
-  INFERENCE_FAST_MODEL = "qwen3-coder-next"
-  INFERENCE_REASONING_MODEL = "qwen3-coder-next"
-  INFERENCE_AGENT_MODEL = "qwen3-coder-next"
-  INFERENCE_SELECTION_MODEL = "qwen3-coder-next"
-  INFERENCE_VERIFICATION_MODEL = "qwen3-coder-next"
+  INFERENCE_FAST_MODEL = "<served-model-id>"
+  INFERENCE_REASONING_MODEL = "<served-model-id>"
+  INFERENCE_AGENT_MODEL = "<served-model-id>"
+  INFERENCE_SELECTION_MODEL = "<served-model-id>"
+  INFERENCE_VERIFICATION_MODEL = "<served-model-id>"
   INFERENCE_EMBEDDING_PROVIDER = "ollama"
   INFERENCE_EMBEDDING_ENDPOINT = "https://embedding.example"
   INFERENCE_EMBEDDING_MODEL = "nomic-embed-text"
@@ -271,6 +274,11 @@ Restart the local MCP service:
 bash scripts/install-mcp.sh
 ```
 
+Current limitation: `mcp_server.py` supports forwarding
+`CONTEXT_ENGINE_API_KEY`, but `scripts/install-mcp.sh` does not write that
+variable into its generated launchd plist. Update the installer or plist before
+expecting the persistent MCP service to authenticate to Fly.
+
 Codex and Claude can continue using the existing local MCP URL:
 
 ```text
@@ -307,6 +315,8 @@ backups belong on the volume.
 
 - Set `CONTEXT_ENGINE_API_KEY`; never expose an unauthenticated cloud engine.
 - Keep MCP bound to `127.0.0.1` on the workstation.
+- Ensure the local MCP launchd plist contains `CONTEXT_ENGINE_API_KEY`; the
+  current installer omits it.
 - Use read-only repository credentials.
 - Never include `.env`, API keys, SSH keys, or Supabase service-role keys in the
   image.

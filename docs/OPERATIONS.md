@@ -6,8 +6,8 @@ Two launchd services, one Python process each:
 
 | Service | Plist | Port | Purpose |
 |---------|-------|------|---------|
-| REST API | `life.ascendvent.context-manager.plist` | `:8088` | All agent endpoints |
-| MCP transport | `life.ascendvent.context-engine-mcp.plist` | `:8089/mcp` | Streamable HTTP MCP adapter |
+| REST API | `life.ascendvent.context-manager.plist` | `0.0.0.0:8088` | REST endpoints and agent runtime |
+| MCP transport | `life.ascendvent.context-engine-mcp.plist` | `127.0.0.1:8089/mcp` | Streamable HTTP MCP adapter |
 
 Both auto-start on login and restart on crash (`KeepAlive=true`). No Docker. No rebuild step — it's plain Python.
 
@@ -56,9 +56,8 @@ launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
 # Start REST API
 launchctl load ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
 
-# Restart after Python changes (no rebuild needed — plain Python)
-launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
-launchctl load  ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+# Reinstall/restart after Python or .env changes
+bash scripts/install-native.sh
 
 # Install or restart MCP transport (handles both unload/copy/load in one step)
 bash scripts/install-mcp.sh
@@ -68,21 +67,16 @@ bash scripts/install-mcp.sh
 
 ---
 
-### Deploying a plist for the first time (new machine or new service)
+### Deploying for the first time
 
-1. Copy the plist to `~/Library/LaunchAgents/`:
+1. Create `.env` from `.env.example` and set repository, artifact, inference,
+   and Supabase values.
+2. Generate and load both launchd services:
    ```bash
-   cp config/life.ascendvent.context-manager.plist ~/Library/LaunchAgents/
-   cp config/life.ascendvent.context-engine-mcp.plist ~/Library/LaunchAgents/
+   bash scripts/install-native.sh
+   bash scripts/install-mcp.sh
    ```
-
-2. Load it (starts immediately and registers for login auto-start):
-   ```bash
-   launchctl load ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
-   launchctl load ~/Library/LaunchAgents/life.ascendvent.context-engine-mcp.plist
-   ```
-
-3. Confirm it's running:
+3. Confirm both are running:
    ```bash
    launchctl list | grep context
    curl -s http://localhost:8088/healthcheck
@@ -90,32 +84,35 @@ bash scripts/install-mcp.sh
 
 ---
 
-### Updating a plist (changed env vars, paths, or KeepAlive settings)
+### Updating launchd configuration
 
-launchctl does **not** hot-reload — you must unload, replace, then reload:
+The installers generate the plist files. Do not copy nonexistent static plist
+templates from the repository. Rerun the appropriate installer:
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
-cp config/life.ascendvent.context-manager.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+bash scripts/install-native.sh
+bash scripts/install-mcp.sh
 ```
 
 ---
 
-### Changing an env var without editing the plist
+### Changing an environment variable
 
-`.env` overrides plist `EnvironmentVariables` at startup. Preferred for secrets and per-machine tuning.
+The application does not load `.env` at runtime. `install-native.sh` parses
+`.env` and bakes values into the generated launchd plist.
 
 ```bash
-# Edit .env (not committed — see .env.example for all keys)
-nano context-engine/.env
-
-# Restart to pick up the change
-launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
-launchctl load  ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+# Edit the repository-root .env, then regenerate/restart
+nano .env
+bash scripts/install-native.sh
 ```
 
 Common vars to tune at runtime: `LOG_LEVEL`, `SLOW_REQUEST_MS`, `ARTIFACTS_MAX_MB`.
+
+`mcp_server.py` supports `CONTEXT_ENGINE_API_KEY`, but
+`scripts/install-mcp.sh` does not currently add it to the generated MCP plist.
+Enabling REST authentication will break the persistent MCP adapter until that
+installer gap is fixed or the plist is modified explicitly.
 
 ---
 
@@ -261,7 +258,7 @@ corpus. See `docs/inference-service.md`.
 
 ## Artifacts — output store
 
-Every endpoint writes to two places:
+Inference and agent workflows that produce artifacts write to two places:
 
 1. **Supabase cloud** — embedded + upserted as vector chunks (primary, searchable across sessions)
 2. **Disk backup** — `~/Library/Application Support/context-store/artifacts/` (crash recovery only)
@@ -333,7 +330,8 @@ These are non-fatal — the REST response still succeeds. Check Supabase connect
 supabase db query --linked "SELECT count(*) FROM code_embeddings;"
 ```
 
-If the query fails, check `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` in `.env`.
+If the query fails, check `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY` in `.env`.
 
 ---
 

@@ -4,7 +4,7 @@ Use this block in a project's `CLAUDE.md`, `AGENTS.md`, or equivalent durable
 agent instructions after registering the `context-engine` MCP server.
 
 ```markdown
-## Local Context Engine
+## Context Engine
 
 A read-only junior engineer is available through the `context-engine` MCP
 server.
@@ -19,8 +19,9 @@ Use `load_context` for a bounded pre-task context bundle, `review_diff` after
 editing, and `audit_issue` for evidence-based issue investigation.
 
 Treat `scan_directory`, `find_in_code`, `summarize_file`,
-`dependency_analysis`, and `vector_search` as advanced direct tools. Do not
-manually orchestrate them when `investigate_codebase` can own the investigation.
+`dependency_analysis`, `route_analysis`, `draft_file`, `scaffold_files`, and
+`vector_search` as advanced direct tools. Do not manually orchestrate them when
+`investigate_codebase` can own the investigation.
 Discovery results are references first. Read only the specific files needed for
 the task after reviewing returned paths and summaries. For advanced direct
 discovery, use `mode=context_safe` first; if the result is thin, has too few

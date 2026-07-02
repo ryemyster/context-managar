@@ -68,9 +68,9 @@ Verify cited source files before implementing or making issue decisions.
 | `audit_issue` | Evidence-based issue audit |
 
 Advanced tools are `scan_directory`, `find_in_code`, `summarize_file`,
-`dependency_analysis`, and `vector_search`. Use them only for a single bounded
-retrieval operation. Do not manually chain them when `investigate_codebase` can
-own the investigation.
+`dependency_analysis`, `route_analysis`, `draft_file`, `scaffold_files`, and
+`vector_search`. Use them only for a single bounded operation. Do not manually
+chain them when `investigate_codebase` can own the investigation.
 
 Discovery tools return compact references by default. Treat their output as an
 index: inspect `path` and `summary`, then fetch exact source content only when
@@ -109,6 +109,11 @@ CONTEXT_ENGINE_MCP_PORT=8089
 
 Set these before running `scripts/install-mcp.sh` when overriding defaults. The
 REST API key is forwarded as `X-API-Key`.
+
+The adapter implements this forwarding, but `scripts/install-mcp.sh` currently
+does not persist `CONTEXT_ENGINE_API_KEY` in the generated launchd plist. An
+authenticated remote REST deployment requires updating that plist or installer
+before the persistent MCP service will work.
 
 ## REST Compatibility
 

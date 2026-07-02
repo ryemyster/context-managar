@@ -16,6 +16,11 @@ The generation and embedding providers are configured independently. This
 allows cloud-hosted generation while retaining the existing local embedding
 model and the 768-dimensional vectors already stored in Supabase.
 
+The service currently selects one generation provider and endpoint for every
+generation role. Role-specific model names work only when that endpoint serves
+those names. Different Runpod/public-provider URLs per role are not yet
+supported.
+
 ## Configuration
 
 Existing installations require no changes. When no `INFERENCE_*` variables are
@@ -48,6 +53,14 @@ INFERENCE_EMBEDDING_MODEL=nomic-embed-text
 
 The provider may also expose `POST /embeddings`, but the recommended migration
 keeps embeddings on Ollama.
+
+The only implemented transports are Ollama and OpenAI-compatible HTTP. There
+are no native Anthropic or Gemini providers.
+
+`/health` and `/debug` retain legacy Ollama-named response fields for external
+contract compatibility. In a cloud-generation configuration, those field names
+do not imply that generation is still using Ollama; use the reported model and
+provider configuration when diagnosing routing.
 
 ## Request sequences
 
@@ -94,6 +107,9 @@ sequenceDiagram
 Streaming, retries, failover, cost routing, and capability-based selection are
 extension points, not active behavior. Add them in the service rather than in
 callers.
+
+For Runpod provisioning, security, and model recommendations, see
+[Managing Runpod Ollama Infrastructure through MCP](runpod-mcp-ollama.md).
 
 ## Vector compatibility
 

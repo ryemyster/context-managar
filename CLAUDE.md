@@ -11,8 +11,9 @@ context-engine/
   requirements-mcp.txt — isolated MCP service dependencies
   app/
     main.py            — all routes + /setup doc (update /setup when adding endpoints)
-    config.py          — env vars and constants — single source of truth
+    config.py          — legacy-compatible app settings and constants
     inference/         — provider-neutral generation, chat, and embeddings
+      config.py        — provider endpoints, credentials, and role models
     models.py          — Pydantic request/response models
     markdown_writer.py — write_*() per endpoint + LRU eviction (_evict_if_needed)
     supabase_vector.py — pgvector client + store_artifact() background indexer
@@ -49,12 +50,14 @@ Generation and embedding providers are configured independently. Keep
 embeddings on Ollama with `nomic-embed-text` unless intentionally migrating and
 re-indexing the 768-dimensional Supabase corpus. See
 `docs/inference-service.md`.
+Runpod provisioning, MCP management, security, and model selection are
+documented in `docs/runpod-mcp-ollama.md`.
 
 Code outside `app/inference/` must not import provider implementations.
 
 ## Service management (launchd)
 
-Native Python/uvicorn process — no Docker. Plist:
+Current deployment is native Python/uvicorn. REST binds `0.0.0.0:8088`. Plist:
 `~/Library/LaunchAgents/life.ascendvent.context-manager.plist`
 
 The MCP transport is a separate service:
@@ -75,6 +78,10 @@ launchctl load ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
 # Install/restart MCP transport
 bash scripts/install-mcp.sh
 ```
+
+Use `bash scripts/install-native.sh` after Python or `.env` changes. The
+installer parses the repository-root `.env`, generates the plist, and restarts
+the service; the application does not load `.env` itself.
 
 ## Logs
 
@@ -173,7 +180,8 @@ context-engine/.venv/bin/python3 -m pytest -v
 context-engine/.venv/bin/python3 -m pytest tests/test_agent_runner.py -v
 ```
 
-Tests use `unittest.mock` — no inference provider or filesystem calls. Safe to run offline.
+Tests mock external inference and network services and use isolated temporary
+filesystem state. They are safe to run offline.
 The venv has `include-system-site-packages = true` so system packages (httpx, pydantic, fastapi) are visible.
 
 ## Dev workflow — adding a Python dependency
@@ -224,7 +232,7 @@ supabase db query --linked "SELECT count(*) FROM code_embeddings;"
 
 ## Artifacts — output store
 
-Every endpoint writes two places:
+Inference and agent workflows that produce artifacts write two places:
 1. **Supabase cloud** — embedded + upserted as vector chunks (primary, searchable across sessions)
 2. **Disk backup** — `~/Library/Application Support/context-store/artifacts/` (crash recovery)
 
@@ -323,4 +331,6 @@ curl -s -X POST http://localhost:8088/context \
 - Keep `mcp_server.py` transport-only; it may map, poll, and shape REST responses but must not duplicate agent logic
 - Keep `mcp_http_server.py` as a persistent transport wrapper over `mcp_server.py`
 - Put primary delegation tools before advanced direct tools and keep descriptions explicit about preferring `investigate_codebase`
-- `CONTEXT_ENGINE_API_KEY` in `config.py` — empty = local dev bypass, non-empty = enforced; health endpoints always exempt
+- `CONTEXT_ENGINE_API_KEY` in `config.py` — empty disables auth, non-empty
+  enforces it; health/setup endpoints remain exempt. REST currently binds
+  `0.0.0.0`, so an empty key is not inherently localhost-only.
