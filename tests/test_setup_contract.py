@@ -37,3 +37,6 @@ async def test_setup_is_context_safe_operational_playbook():
     assert "**Read**" in body
     assert "**Execute**" in body
     assert "**Verify**" in body
+    assert "## 4. Endpoint Specifications & Timeouts" in body
+    assert "**Workload Classes:**" in body
+    assert "**Rules for Orchestrators:**" in body

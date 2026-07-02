@@ -6,8 +6,12 @@ def get_usage_guide(
     base: str,
     repo: str,
     mcp_url: str,
+    ollama_timeout: int,
+    reason_timeout: int,
+    agent_timeout: int,
+    call_timeout: int,
 ) -> str:
-    """Return concise operational integration guide markdown."""
+    """Return concise operational integration guide markdown with endpoint expectations and timeouts."""
     return (
         "# Context Engine Usage Guide\n\n"
         f"_Base URL: `{base}` · REPO_ROOT: `{repo}`_\n\n"
@@ -35,5 +39,23 @@ def get_usage_guide(
         "2. **Assess**: Evaluate match scores and paths. If matches are thin, retry once without `mode=context_safe`.\n"
         "3. **Read**: Retrieve details of specific files using `/read` (bounded using `max_chars`).\n"
         "4. **Execute**: Modify the codebase.\n"
-        "5. **Verify**: Always run `/diff-summary` to audit your changes.\n"
+        "5. **Verify**: Always run `/diff-summary` to audit your changes.\n\n"
+
+        "## 4. Endpoint Specifications & Timeouts\n\n"
+        "**Workload Classes:**\n"
+        "- **Interactive**: Await directly. If a call times out, narrow the path/scope parameter rather than increasing client timeouts.\n"
+        "- **Background (Async)**: Fire-and-poll. Returns a `run_id` immediately; poll status periodically.\n\n"
+        "**Per-Endpoint Timeouts & Budgets:**\n\n"
+        "| Endpoint Group | Mode | Hard Timeout | Notes |\n"
+        "| :--- | :--- | :--- | :--- |\n"
+        f"| `/health`, `/healthcheck`, `/setup` | Interactive | — | Always fast |\n"
+        "| `/vector-search` | Interactive | 90s | Semantic index lookup |\n"
+        f"| `/scan`, `/find`, `/routes`, `/dependencies`, `/summarize` | Interactive | {ollama_timeout}s | Codebase metadata & snippet extraction |\n"
+        f"| `/context`, `/draft`, `/scaffold` | Interactive | {ollama_timeout}s | Code and context generation |\n"
+        f"| `/diff-summary` | Interactive/Sync | {reason_timeout}s | Deep change assessment & risk review |\n"
+        f"| `/agents/run`, `/agents/issue-auditor/run` | Async (Poll) | {agent_timeout}s (Total) | Deep agent runs; poll status every 10–30s (max {call_timeout}s per call) |\n\n"
+        "**Rules for Orchestrators:**\n"
+        "- Await Interactive endpoints directly.\n"
+        "- Poll Background loops on their status endpoints; never block the main thread.\n"
+        "- If a call returns a partial result or `stopped_reason: timeout`, retry with a narrower scope.\n"
     )

@@ -208,6 +208,10 @@ async def setup():
         base=base,
         repo=repo,
         mcp_url=mcp_url,
+        ollama_timeout=int(config.OLLAMA_TIMEOUT),
+        reason_timeout=int(config.OLLAMA_REASON_TIMEOUT),
+        agent_timeout=int(config.OLLAMA_AGENT_TIMEOUT),
+        call_timeout=int(config.OLLAMA_AGENT_CALL_TIMEOUT),
     )
 
 
