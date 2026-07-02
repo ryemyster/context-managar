@@ -116,3 +116,8 @@ CODE_EXTENSIONS: set[str] = {
     ".sql", ".sh", ".md",
     ".css", ".scss",
 }
+
+# ── Chunking defaults ──────────────────────────────────────────────────────────
+DEFAULT_CHUNK_SIZE    = int(os.getenv("DEFAULT_CHUNK_SIZE", "500"))
+DEFAULT_CHUNK_OVERLAP = int(os.getenv("DEFAULT_CHUNK_OVERLAP", "50"))
+

@@ -14,16 +14,15 @@ Hard rules enforced here:
 import asyncio
 import time
 import traceback
-import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 from . import config
 from . import supabase_vector
 from .inference import inference
 from .logger import log, request_id_var
+from .utils import chunk_text
 
 
 @asynccontextmanager
@@ -71,6 +70,9 @@ from .context_builder import build_context
 from .issue_auditor import collect_agent_evidence, findings_from_evidence, insufficient_evidence_findings
 from .context_builder import _issue_numbers
 
+from .middleware import AuthMiddleware, RequestLogMiddleware
+from .templates.usage_guide import get_usage_guide
+
 app = FastAPI(
     title="context-engine",
     version="1.0.0",
@@ -78,57 +80,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-
-_BYPASS_PATHS = {"/health", "/healthcheck", "/setup"}
-
-
-class _AuthMiddleware(BaseHTTPMiddleware):
-    """
-    API key enforcement. Enabled only when CONTEXT_ENGINE_API_KEY is set.
-    Skips auth for health/setup paths so monitoring works unauthenticated.
-    Local dev: leave the env var unset — all requests pass through.
-    Cloud: set CONTEXT_ENGINE_API_KEY to a strong secret.
-    """
-    async def dispatch(self, request: Request, call_next):
-        if config.CONTEXT_ENGINE_API_KEY:
-            if request.url.path not in _BYPASS_PATHS:
-                key = request.headers.get("X-API-Key", "")
-                if key != config.CONTEXT_ENGINE_API_KEY:
-                    log.warning("auth rejected path=%s", request.url.path)
-                    return JSONResponse(
-                        status_code=401,
-                        content={"detail": "X-API-Key required"},
-                        headers={"WWW-Authenticate": "ApiKey"},
-                    )
-        return await call_next(request)
-
-
-class _RequestLog(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        rid = request.headers.get("X-Request-Id") or uuid.uuid4().hex[:12]
-        token = request_id_var.set(rid)
-        t0 = time.monotonic()
-        try:
-            response = await call_next(request)
-        except Exception:
-            dur = time.monotonic() - t0
-            log.error("unhandled path=%s dur=%.3fs\n%s",
-                      request.url.path, dur, traceback.format_exc())
-            return JSONResponse(status_code=500, content={"detail": "internal server error"})
-        finally:
-            request_id_var.reset(token)
-        dur = time.monotonic() - t0
-        ms  = dur * 1000
-        slow = ms > config.SLOW_REQUEST_MS
-        lvl = log.warning if (response.status_code >= 500 or slow) else log.info
-        extra = " SLOW" if slow else ""
-        lvl("%s %s %d %.0fms%s rid=%s", request.method, request.url.path, response.status_code, ms, extra, rid)
-        response.headers["X-Request-Id"] = rid
-        return response
-
-
-app.add_middleware(_RequestLog)
-app.add_middleware(_AuthMiddleware)
+app.add_middleware(RequestLogMiddleware)
+app.add_middleware(AuthMiddleware)
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────
@@ -328,248 +281,15 @@ async def setup():
     emb_status    = "available" if embed_ok  else "offline"
     vec_status    = "ready"     if vec_ok    else "not indexed"
 
-    return (
-        "# Context Engine Usage Guide\n\n"
-        f"_Base URL: `{base}` · REPO_ROOT: `{repo}`_\n\n"
-
-        "## Core Principle\n\n"
-        "Context Engine is a retrieval system.\n\n"
-        "Use references first.\n"
-        "Retrieve details only when necessary.\n\n"
-        "Avoid loading large artifacts into context.\n\n"
-
-        "## Agent Integration\n\n"
-        "Point agents at this endpoint when connecting a repository. The agent should "
-        "read this guide, then update durable project instructions so future coding "
-        "sessions use Context Engine consistently.\n\n"
-        "Preferred MCP transport:\n\n"
-        "```bash\n"
-        f"claude mcp add --scope user --transport http context-engine {mcp_url}\n"
-        f"codex mcp add context-engine --url {mcp_url}\n"
-        "```\n\n"
-        "Recommended repository rule text:\n\n"
-        "```markdown\n"
-        "## Context Engine\n\n"
-        "Use Context Engine for non-trivial repository work. Treat it as a retrieval "
-        "index: discover references first, read only selected files, and keep "
-        "responses in `mode=context_safe` unless exact implementation detail is "
-        "required. If a discovery result is thin, has too few hits, or lacks "
-        "enough content to choose the next read, make one re-call without the mode flag "
-        "before broadening reads. Verify source files before editing. Context Engine is read-only; "
-        "the coding agent owns all repository writes and decisions.\n"
-        "```\n\n"
-        "When coding is in play, update the repo's agent-facing files as applicable: "
-        "`AGENTS.md`, `CLAUDE.md`, `.claude/rules/*`, MCP config, slash commands, "
-        "skills, hooks, or local scripts. Keep those integrations aligned with the "
-        "`find -> assess -> read -> act -> verify` workflow below.\n\n"
-
-        "## Recommended Workflow\n\n"
-        "### Path Contract\n\n"
-        "Every repository path must be relative to `REPO_ROOT` and include the "
-        "`owner/repo` prefix. Do not pass bare `src`, `app/api`, `.`, or absolute "
-        "filesystem paths.\n\n"
-        "Good:\n\n"
-        "```text\n"
-        "ascendvent/checkin-ascendvent/app/clients/[id]\n"
-        "ryemyster/context-manager/context-engine/app\n"
-        "```\n\n"
-        "Bad:\n\n"
-        "```text\n"
-        "app/clients/[id]\n"
-        "/Users/name/Repos/owner/repo/app\n"
-        ".\n"
-        "```\n\n"
-        "Wrong or overly broad paths cause low-quality retrieval, wasted agent "
-        "iterations, and apparent MCP timeouts.\n\n"
-
-        "### Choose the Smallest Tool\n\n"
-        "`load_context` / `POST /context` is the default first pass for bounded "
-        "pre-task inventory. It uses the fast code model and usually completes "
-        "interactively.\n\n"
-        "`investigate_codebase` / `POST /agents/run` is a deep junior-agent loop. "
-        "Use it only when the task needs multi-step investigation, planning, "
-        "memory, verification, or repair passes. It can take 10–50 minutes and "
-        "may exceed MCP host timeouts even while the local background run is still "
-        "polling.\n\n"
-        "For quick component/API questions, prefer `load_context` with scoped paths "
-        "and focus terms before escalating to `investigate_codebase`.\n\n"
-
-        "### Step 1: Discover\n\n"
-        "Use:\n\n"
-        "- `load_context` / `/context` for bounded pre-task inventory\n"
-        "- `investigate_codebase` / `/agents/run` only for deep multi-step investigation\n"
-        "- `/find`\n"
-        "- `/vector-search`\n"
-        "- `/scan`\n\n"
-        "Goal: identify candidate artifacts.\n\n"
-        "Do not immediately load content.\n\n"
-        "Example requests:\n\n"
-        "```json\n"
-        "{\"query\":\"auth middleware\",\"path\":\"owner/repo/src\",\"mode\":\"context_safe\",\"max_results\":8}\n"
-        "```\n\n"
-        "```json\n"
-        "{\"query\":\"session validation\",\"limit\":5,\"mode\":\"context_safe\"}\n"
-        "```\n\n"
-        "```json\n"
-        "{\"path\":\"owner/repo/src/app/api\",\"mode\":\"context_safe\",\"max_results\":10}\n"
-        "```\n\n"
-
-        "### Step 2: Assess Confidence (gate)\n\n"
-        "Before reading anything, decide:\n\n"
-        "**HIGH confidence → proceed to Step 3:**\n\n"
-        "- ≥1 artifact with a matching path\n"
-        "- Specific file or symbol located\n"
-        "- Scope ≤3 files\n\n"
-        "**LOW confidence → escalate in order:**\n\n"
-        "1. One re-call without `mode=context_safe`\n"
-        "2. Spawn an Explore subagent\n"
-        "3. Ask the user\n\n"
-        "**LOW signals:** 0 artifacts returned, unrelated paths, symbol not found, scope >5 files.\n\n"
-
-        "### Step 3: Read\n\n"
-        "Use:\n\n"
-        "- `/read`\n"
-        "- equivalent content endpoint\n\n"
-        "Read 1–3 artifacts max.\n\n"
-        "Prefer summary mode.\n\n"
-        "Use full mode only when implementation requires exact details.\n\n"
-        "Example request:\n\n"
-        "```json\n"
-        "{\"path\":\"owner/repo/src/auth/middleware.ts\",\"max_chars\":12000}\n"
-        "```\n\n"
-
-        "### Step 4: Execute\n\n"
-        "Perform work using the minimal required context. Verify cited source files "
-        "before making repository changes or final claims.\n\n"
-
-        "### Step 5: Verify\n\n"
-        "After every Edit or Write, call `/diff-summary` with `git diff HEAD`.\n\n"
-        "Do not skip this step. It is a required gate, not an optional review.\n\n"
-
-        "### Step 6: Refresh if Stale\n\n"
-        "If follow-up edits shift scope, repeat from Step 1.\n\n"
-        "Do not preload repositories.\n\n"
-
-        "## Anti-Patterns\n\n"
-        "Avoid:\n\n"
-        "- Reading entire repositories\n"
-        "- Reading large files before relevance is established\n"
-        "- Loading multiple architecture documents simultaneously\n"
-        "- Returning full scan results\n"
-        "- Using full-detail mode by default\n\n"
-
-        "## Claude Code Guidance\n\n"
-        "Preferred:\n\n"
-        "```text\n"
-        "find → assess → read → act → verify\n"
-        "```\n\n"
-        "Not:\n\n"
-        "```text\n"
-        "scan everything → read everything → act\n"
-        "```\n\n"
-
-        "## Context Budget Guidance\n\n"
-        "Small task: 1-3 artifacts\n\n"
-        "Medium task: 3-10 artifacts\n\n"
-        "Large task: 10+ artifacts only when explicitly justified\n\n"
-
-        "## Endpoint Recommendations\n\n"
-        "Discovery:\n\n"
-        "- `/find`\n"
-        "- `/vector-search`\n\n"
-        "Inspection:\n\n"
-        "- `/read`\n\n"
-        "Repository Understanding:\n\n"
-        "- `/routes`\n"
-        "- `/dependencies`\n\n"
-        "Summaries:\n\n"
-        "- `/summarize`\n\n"
-
-        "## Context-Safe Mode\n\n"
-        "Always prefer:\n\n"
-        "```text\n"
-        "mode=context_safe\n"
-        "```\n\n"
-        "unless detailed implementation work requires otherwise. Use the two-call "
-        "fallback for thin discovery results: call with `mode=context_safe` first, "
-        "then make one re-call without the mode flag when the result has too few hits, "
-        "low-content summaries, or insufficient evidence to narrow the next read.\n\n"
-
-        "## Example Workflows\n\n"
-        "Bug fix:\n\n"
-        "1. `/find` with `mode=context_safe` for the failing symbol or error text.\n"
-        "   If the result is thin, make one re-call without the mode flag before reading broadly.\n"
-        "2. Narrow to 1-3 candidate files using paths, summaries, scores, and metadata.\n"
-        "3. `/read` only those files with a bounded `max_chars`.\n"
-        "4. Make the fix, then use `/diff-summary` for risk review.\n\n"
-        "Architecture question:\n\n"
-        "1. `/dependencies` or `/routes` with `mode=context_safe` on the smallest relevant path.\n"
-        "   If the result is thin, make one re-call without the mode flag before expanding scope.\n"
-        "2. Use returned references to choose the subsystem boundary.\n"
-        "3. `/read` only the entry points and directly related files.\n"
-        "4. Refresh discovery if the evidence points to a different subsystem.\n\n"
-        "Semantic lookup:\n\n"
-        "1. `/vector-search` with a narrow query, low `limit`, and `mode=context_safe`.\n"
-        "   If matches are too sparse or summaries lack enough content, make one re-call without the mode flag.\n"
-        "2. Compare summaries and scores.\n"
-        "3. `/read` the top matching artifact only when exact code or prose is required.\n\n"
-
-        "## Agent Usage Recommendations\n\n"
-        "- Treat discovery responses as an index, not as source truth.\n"
-        "- Use `metadata.truncated` and `metadata.payload_bytes` to decide whether to narrow further.\n"
-        "- Prefer `max_results` and `max_chars` on every exploratory request.\n"
-        "- Escalate to `detail=full` only after a reference is proven relevant.\n"
-        "- If the service is unavailable, continue without it; do not block the task.\n\n"
-
-        "## Token-Saving Rationale\n\n"
-        "References preserve discoverability while avoiding permanent insertion of "
-        "large file bodies, route maps, dependency graphs, and artifacts into the "
-        "agent session. The efficient pattern is to spend cheap retrieval calls on "
-        "candidate discovery, then spend context only on the few artifacts needed "
-        "for judgment or implementation.\n\n"
-
-        "## Timing Reference\n\n"
-        "Latency depends on the configured providers. Existing timeout values retain "
-        "the conservative local-Ollama budgets for backwards compatibility. Always "
-        "poll async endpoints; never assume synchronous completion.\n\n"
-        "**Role-based model routing:**\n\n"
-        "| Role | Provider | Model | Workload |\n"
-        "|---|---|---|---|\n"
-        f"| Fast | `{inference.settings.generation.name}` | `{inference.settings.fast_model}` | Code reading, pattern matching, grep synthesis |\n"
-        f"| Agent | `{inference.settings.generation.name}` | `{inference.settings.agent_model}` | Structural analysis and agent runs |\n"
-        f"| Reasoning | `{inference.settings.generation.name}` | `{inference.settings.reasoning_model}` | Diff and risk analysis |\n"
-        f"| Embeddings | `{inference.settings.embedding.name}` | `{inference.settings.embedding_model}` | Semantic search and indexing |\n\n"
-        "**Workload classes:**\n\n"
-        "Interactive (expect <2 min, safe to await synchronously):\n"
-        "`/scan` `/find` `/routes` `/dependencies` `/vector-search` `/summarize`\n\n"
-        "Background (fire-and-poll via `run_id`):\n"
-        "`/agents/run` `/agents/issue-auditor/run` `/diff-summary` — deep architecture review, large repository analysis, governance review\n\n"
-        "**Per-endpoint wall-clock budget:**\n\n"
-        "| Endpoint | Model tier | Typical | Hard timeout | Notes |\n"
-        "|---|---|---|---|---|\n"
-        "| `/health` `/healthcheck` `/setup` | none | <1s | — | Always fast |\n"
-        f"| `/vector-search` | embed (`{inference.settings.embedding_model}`) | provider-dependent | 90s | Preserves the configured embedding corpus |\n"
-        f"| `/scan` `/find` `/routes` `/dependencies` | fast (`{inference.settings.fast_model}`) | provider-dependent | {int(config.OLLAMA_TIMEOUT)}s | Interactive |\n"
-        f"| `/summarize` `/context` `/draft` `/scaffold` | fast (`{inference.settings.fast_model}`) | provider-dependent | {int(config.OLLAMA_TIMEOUT)}s | Interactive |\n"
-        f"| `/diff-summary` | reasoning (`{inference.settings.reasoning_model}`) | provider-dependent | {int(config.OLLAMA_REASON_TIMEOUT)}s | Background; poll or fire-and-forget |\n"
-        f"| `/agents/run` | agent (`{inference.settings.agent_model}`, multi-turn) | provider-dependent | {int(config.OLLAMA_AGENT_TIMEOUT)}s total / {int(config.OLLAMA_AGENT_CALL_TIMEOUT)}s per call | Background; poll `/agents/run/status/{{run_id}}` every 10–30s |\n"
-        f"| `/agents/issue-auditor/run` | agent (`{inference.settings.agent_model}`, multi-turn) | provider-dependent | {int(config.OLLAMA_AGENT_TIMEOUT)}s total / {int(config.OLLAMA_AGENT_CALL_TIMEOUT)}s per call | Background; same loop as `/agents/run` |\n\n"
-        "**Rules for orchestrators (Claude, Codex, GPT, Agy):**\n\n"
-        "- Interactive endpoints: await directly, expect <2 min.\n"
-        "- Background endpoints: fire and poll. Never block your context on them.\n"
-        f"- Agent runs: submit, get `run_id`, poll `/agents/run/status/{{run_id}}` every 10–30s. Total budget is {int(config.OLLAMA_AGENT_TIMEOUT)}s ({int(config.OLLAMA_AGENT_TIMEOUT)//60} min); each model call may take up to {int(config.OLLAMA_AGENT_CALL_TIMEOUT)}s.\n"
-        "- Structured selection and answer generation use the agent model; native tool-call fallback and verification use their configured roles.\n"
-        "- Local providers may incur cold-load or model-swap latency.\n"
-        "- If a call exceeds its timeout, the server returns a 504 or partial result with `stopped_reason: timeout`. Treat that as a signal to retry with a narrower task, not to increase client timeout.\n\n"
-
-        "## Live Status\n\n"
-        "| Capability | Model | Status |\n"
-        "|---|---|---|\n"
-        f"| Code model (default, interactive) | `{inference.settings.fast_model}` | {gen_status} |\n"
-        f"| Arch review model (agent runs) | `{inference.settings.agent_model}` | {arch_status} |\n"
-        f"| Deep reasoning (`/diff-summary`) | `{inference.settings.reasoning_model}` | {reason_status} |\n"
-        f"| Embeddings | `{inference.settings.embedding_model}` | {emb_status} |\n"
-        f"| Vector index | — | {vec_status} |\n"
+    return get_usage_guide(
+        base=base,
+        repo=repo,
+        mcp_url=mcp_url,
+        gen_status=gen_status,
+        arch_status=arch_status,
+        reason_status=reason_status,
+        emb_status=emb_status,
+        vec_status=vec_status,
     )
 
 
@@ -1344,7 +1064,7 @@ async def index(req: IndexRequest):
                 rp = rel_path(f)
 
                 # Chunk into ~500-char pieces with 50-char overlap
-                chunks = _chunk_text(content, chunk_size=500, overlap=50)
+                chunks = chunk_text(content, chunk_size=500, overlap=50)
 
                 for chunk in chunks:
                     if not chunk.strip():
@@ -1748,12 +1468,4 @@ async def agents_run_status(run_id: str):
     return resp
 
 
-def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
-    """Split text into overlapping chunks."""
-    chunks = []
-    start  = 0
-    while start < len(text):
-        end = min(start + chunk_size, len(text))
-        chunks.append(text[start:end])
-        start += chunk_size - overlap
-    return chunks
+

@@ -13,10 +13,14 @@ The calling code must never crash because vector ops failed.
 """
 
 import hashlib
+import json
+from pathlib import Path
 from typing import Any
 import httpx
 from . import config
 from .logger import log
+from .inference import inference
+from .utils import chunk_text
 
 _client: httpx.AsyncClient | None = None
 _vector_ready: bool | None = None   # cached after first check
@@ -183,9 +187,6 @@ async def store_artifact(file_path: str) -> None:
     if not await is_available():
         return
     try:
-        from pathlib import Path
-        from .inference import inference
-
         path = Path(file_path)
         if not path.exists():
             return
@@ -193,7 +194,7 @@ async def store_artifact(file_path: str) -> None:
         if not content.strip():
             return
 
-        chunks = _chunk_text(content)
+        chunks = chunk_text(content)
         for chunk in chunks:
             if not chunk.strip():
                 continue
@@ -221,10 +222,6 @@ async def store_artifact_record(record_path: str, *, source_type: str = "artifac
     if not await is_available():
         return warnings
     try:
-        from pathlib import Path
-        import json
-        from .inference import inference
-
         path = Path(record_path)
         if not path.exists():
             return warnings
@@ -254,7 +251,7 @@ async def store_artifact_record(record_path: str, *, source_type: str = "artifac
             default=str,
         )
 
-        chunks = _chunk_text(searchable)
+        chunks = chunk_text(searchable)
         for chunk in chunks:
             if not chunk.strip():
                 continue
@@ -276,12 +273,7 @@ async def store_artifact_record(record_path: str, *, source_type: str = "artifac
     return warnings
 
 
-def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
-    chunks, start = [], 0
-    while start < len(text):
-        chunks.append(text[start:min(start + chunk_size, len(text))])
-        start += chunk_size - overlap
-    return chunks
+
 
 
 async def reset_cache() -> None:
