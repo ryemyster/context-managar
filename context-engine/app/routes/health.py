@@ -200,32 +200,14 @@ async def setup():
     This endpoint is intentionally context-safe: it teaches retrieval behavior
     without embedding a full configuration manual into the caller's session.
     """
-    models       = await inference.list_models()
-    embed_models = await inference.list_embedding_models()
-    model_ok   = any(inference.settings.fast_model in m for m in models)
-    arch_ok    = any(inference.settings.agent_model in m for m in models)
-    reason_ok  = any(inference.settings.reasoning_model in m for m in models)
-    embed_ok   = any(inference.settings.embedding_model in m for m in embed_models)
-    vec_ok     = await supabase_vector.is_available()
     repo       = str(config.REPO_ROOT)
     base       = "http://localhost:8088"
     mcp_url    = "http://127.0.0.1:8089/mcp"
-
-    gen_status    = "available" if model_ok  else "offline"
-    arch_status   = "available" if arch_ok   else "offline"
-    reason_status = "available" if reason_ok else "offline"
-    emb_status    = "available" if embed_ok  else "offline"
-    vec_status    = "ready"     if vec_ok    else "not indexed"
 
     return get_usage_guide(
         base=base,
         repo=repo,
         mcp_url=mcp_url,
-        gen_status=gen_status,
-        arch_status=arch_status,
-        reason_status=reason_status,
-        emb_status=emb_status,
-        vec_status=vec_status,
     )
 
 
