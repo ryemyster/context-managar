@@ -6,6 +6,31 @@ Single source of truth. All other modules import from here.
 import os
 from pathlib import Path
 
+
+def _clean_env_path(value: str) -> str:
+    """Trim whitespace and one matching quote pair from a path env var."""
+    cleaned = value.strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {"'", '"'}:
+        cleaned = cleaned[1:-1].strip()
+    return cleaned
+
+
+def resolve_output_dir(raw_value: str, repo_root: Path) -> Path:
+    """
+    Resolve OUTPUT_DIR and reject paths inside REPO_ROOT.
+
+    Artifacts are generated retrieval outputs. If they land inside the repo tree,
+    future scans and indexes can ingest generated artifacts as source context.
+    """
+    output_dir = Path(_clean_env_path(raw_value)).expanduser().resolve()
+    resolved_repo = repo_root.resolve()
+    if output_dir == resolved_repo or output_dir.is_relative_to(resolved_repo):
+        raise RuntimeError(
+            "OUTPUT_DIR must be outside REPO_ROOT; generated artifacts would "
+            f"pollute repository scans: OUTPUT_DIR={output_dir} REPO_ROOT={resolved_repo}"
+        )
+    return output_dir
+
 # ── Ollama ─────────────────────────────────────────────────────────────────────
 OLLAMA_HOST         = os.getenv("OLLAMA_HOST",         "http://founderos-ollama:11434")
 OLLAMA_MODEL        = os.getenv("OLLAMA_MODEL",        "qwen2.5-coder:3b")
@@ -21,7 +46,7 @@ OLLAMA_EMBED_MODEL  = os.getenv("OLLAMA_EMBED_MODEL",  "nomic-embed-text")
 OLLAMA_TIMEOUT        = 150.0   # qwen2.5-coder:3b max observed 122.8s × 1.1 = 135s → 150s
 OLLAMA_REASON_TIMEOUT = 600.0   # qwen3.5:9b max observed 519.3s × 1.1 = 571s → 600s
 OLLAMA_ARCH_TIMEOUT   = float(os.getenv("OLLAMA_ARCH_TIMEOUT", "650.0"))  # qwen3:4b max observed 562.6s × 1.1 = 619s → 650s
-OLLAMA_NUM_CTX        = 4096    # 3b at 4096 ctx = ~2.4GB total — fine on 16GB M3
+OLLAMA_NUM_CTX        = int(os.getenv("OLLAMA_NUM_CTX", "32768"))
 OLLAMA_NUM_PREDICT    = 400     # max output tokens for code model
 OLLAMA_REASON_PREDICT = 1024    # reasoning model needs room for chain-of-thought
 
@@ -37,8 +62,8 @@ AGENT_MAX_REPAIR_ITERATIONS = int(os.getenv("AGENT_MAX_REPAIR_ITERATIONS",   "3"
 AGENT_TOOL_RESULT_MAX_CHARS = int(os.getenv("AGENT_TOOL_RESULT_MAX_CHARS",   "3000"))   # truncate tool results to protect context window
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-REPO_ROOT  = Path(os.getenv("REPO_ROOT",   "/repo")).resolve()
-OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR",  "/output")).resolve()
+REPO_ROOT  = Path(_clean_env_path(os.getenv("REPO_ROOT", "/repo"))).expanduser().resolve()
+OUTPUT_DIR = resolve_output_dir(os.getenv("OUTPUT_DIR", "/output"), REPO_ROOT)
 
 # Max size of the artifacts dir before oldest files are evicted (0 = no limit)
 ARTIFACTS_MAX_MB = int(os.getenv("ARTIFACTS_MAX_MB", "50"))

@@ -48,16 +48,15 @@ It also exposes individual deterministic endpoints (scan, find, summarize, conte
 │  └── /diff-summary                   — reasoning model             │
 │                                                                     │
 │  Shared infrastructure                                              │
-│  ├── ollama_client.py  — generate() · chat_with_tools() · embed()  │
-│  ├── repo_reader.py    — safe_resolve() path guard (never bypass)  │
+│  ├── inference/       — role routing + provider normalization       │
+│  ├── repo_reader.py   — safe_resolve() path guard (never bypass)   │
 │  └── supabase_vector.py — background artifact indexing             │
 └─────────────────────────────────────────────────────────────────────┘
          │                          │                      │
          ▼                          ▼                      ▼
-   ~/Repos (read-only)     Ollama :11434          Supabase cloud
-   REPO_ROOT               qwen2.5-coder:3b       pgvector store
-                           qwen3.5:9b             rwtaxwtbwtyxcdlkozod
-                           nomic-embed-text
+   ~/Repos (read-only)   OpenAI-compatible API      Supabase cloud
+   REPO_ROOT             generation/agent roles     pgvector store
+                         Ollama embeddings
 ```
 
 ### Deployment modes
@@ -71,22 +70,26 @@ For cloud: put a TLS-terminating reverse proxy (nginx, Caddy, cloud load balance
 
 ---
 
-## Three-model stack
+## Inference routing
 
-| Model | Env var | Used by |
-|-------|---------|---------|
-| `qwen2.5-coder:3b` | `OLLAMA_MODEL` | `/context`, `/scan`, `/find`, `/summarize` |
-| `qwen2.5-coder:3b` | `OLLAMA_AGENT_MODEL` | `/agents/run` answer generation |
-| `qwen2.5-coder:3b` | `OLLAMA_AGENT_SELECT_MODEL` | `/agents/run` schema-constrained tool selection |
-| `qwen2.5-coder:3b` | `OLLAMA_AGENT_VERIFY_MODEL` | `/agents/run` schema-constrained evidence verification |
-| `qwen3.5:9b` | `OLLAMA_REASON_MODEL` | `/diff-summary`, agent verification |
-| `nomic-embed-text` | `OLLAMA_EMBED_MODEL` | `/index`, `/vector-search`, `/context` (vector step) |
+| Role | New env var | Legacy default | Used by |
+|------|-------------|----------------|---------|
+| Fast | `INFERENCE_FAST_MODEL` | `OLLAMA_MODEL` | `/context`, `/scan`, `/find`, `/summarize`, `/draft`, `/scaffold` |
+| Reasoning | `INFERENCE_REASONING_MODEL` | `OLLAMA_REASON_MODEL` | `/diff-summary` |
+| Agent | `INFERENCE_AGENT_MODEL` | `OLLAMA_AGENT_MODEL` | `/agents/run` structured selection and answer generation |
+| Selection fallback | `INFERENCE_SELECTION_MODEL` | `OLLAMA_AGENT_SELECT_MODEL` | `/agents/run` native tool-call fallback |
+| Verification | `INFERENCE_VERIFICATION_MODEL` | `OLLAMA_AGENT_VERIFY_MODEL` | `/agents/run` evidence verification |
+| Embedding | `INFERENCE_EMBEDDING_MODEL` | `OLLAMA_EMBED_MODEL` | `/index`, `/vector-search`, `/context` |
 
-Routing rule: `/agents/run` uses the fast 3B model with JSON schemas for tool selection and verification. `/diff-summary` keeps the 9B reasoning model. Everything else uses `generate()` or `embed()`.
+Generation and embedding providers are independent. Existing installations
+default to Ollama for both. The recommended cloud migration sends generation
+and agent roles to an OpenAI-compatible endpoint while keeping
+`nomic-embed-text` on Ollama, preserving the existing Supabase vector corpus.
+See [Inference Service](docs/inference-service.md).
 
 Agent memory preflight is best-effort and defaults to a 10-second ceiling. Each
 agent model turn defaults to 90 seconds, below the total 600-second run budget,
-so an unhealthy Ollama process returns a structured model error instead of
+so an unhealthy inference provider returns a structured model error instead of
 stalling until the outer worker timeout. Post-run verification has a separate
 60-second ceiling and degrades to `verifier_timeout` without discarding the
 agent result.
@@ -227,6 +230,22 @@ SUPABASE_SERVICE_ROLE_KEY=<service_role secret from Supabase Studio → Settings
 OLLAMA_HOST=http://localhost:11434
 ```
 
+To use cloud generation without changing existing embeddings:
+
+```env
+INFERENCE_GENERATION_PROVIDER=openai_compatible
+INFERENCE_GENERATION_ENDPOINT=https://provider.example/v1
+INFERENCE_GENERATION_API_KEY=<secret>
+INFERENCE_FAST_MODEL=<cloud-model>
+INFERENCE_REASONING_MODEL=<cloud-model>
+INFERENCE_AGENT_MODEL=<cloud-model>
+INFERENCE_SELECTION_MODEL=<cloud-model>
+INFERENCE_VERIFICATION_MODEL=<cloud-model>
+INFERENCE_EMBEDDING_PROVIDER=ollama
+INFERENCE_EMBEDDING_ENDPOINT=http://localhost:11434
+INFERENCE_EMBEDDING_MODEL=nomic-embed-text
+```
+
 ### 3. Create the venv
 
 ```bash
@@ -326,7 +345,7 @@ Test coverage:
 | `tests/test_context_builder.py` | Context bundle helpers, path filtering, suggestion ranking |
 | `tests/test_issue_auditor.py` | Evidence classification, rule-based recommendations, findings edge cases |
 
-Tests use `unittest.mock` — no Ollama or filesystem calls. Safe to run offline.
+Tests use `unittest.mock` — no inference provider or filesystem calls. Safe to run offline.
 
 ### Adding a Python dependency
 
@@ -508,7 +527,17 @@ Same cloud Supabase project works from any deployment location. Set `SUPABASE_UR
 ### Cloud env checklist
 
 ```
-OLLAMA_HOST=http://<ollama-host>:11434
+INFERENCE_GENERATION_PROVIDER=openai_compatible
+INFERENCE_GENERATION_ENDPOINT=https://<provider>/v1
+INFERENCE_GENERATION_API_KEY=<secret>
+INFERENCE_FAST_MODEL=<cloud-model>
+INFERENCE_REASONING_MODEL=<cloud-model>
+INFERENCE_AGENT_MODEL=<cloud-model>
+INFERENCE_SELECTION_MODEL=<cloud-model>
+INFERENCE_VERIFICATION_MODEL=<cloud-model>
+INFERENCE_EMBEDDING_PROVIDER=ollama
+INFERENCE_EMBEDDING_ENDPOINT=http://<ollama-host>:11434
+INFERENCE_EMBEDDING_MODEL=nomic-embed-text
 REPO_ROOT=/path/to/repos
 OUTPUT_DIR=/path/to/artifacts
 SUPABASE_URL=https://rwtaxwtbwtyxcdlkozod.supabase.co
@@ -624,7 +653,7 @@ The `tips` field maps each failure mode to its fix.
 
 | Symptom | Fix |
 |---------|-----|
-| `/healthcheck` returns 503 | Check `reason` field: `model not available` → Ollama down; `repo not mounted` → bad `REPO_ROOT` |
+| `/healthcheck` returns 503 | Check `reason` field: `model not available` → generation provider/model configuration; `repo not mounted` → bad `REPO_ROOT` |
 | `ollama: false` in health | `curl http://localhost:11434/api/tags` — if down, run `ollama serve` |
 | `vector_ready: false` | Run `/index` first; check `supabase_key_set: true` in `/debug` |
 | `store_artifact failed` in logs | Non-fatal — Supabase connection issue; disk backup still written |

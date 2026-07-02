@@ -10,6 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$ROOT/scripts/lib/env.sh"
 
 PLIST_LABEL="life.ascendvent.context-manager"
 PLIST_PATH="$HOME/Library/LaunchAgents/${PLIST_LABEL}.plist"
@@ -77,7 +78,9 @@ if [[ ! -f "$ROOT/.env" ]]; then
   echo "    $ROOT/.env"
   echo ""
   echo "  Required configuration:"
-  echo "    OLLAMA_HOST=http://localhost:11434"
+  echo "    INFERENCE_EMBEDDING_ENDPOINT=http://localhost:11434"
+  echo "    INFERENCE_EMBEDDING_MODEL=nomic-embed-text"
+  echo "    # Configure INFERENCE_GENERATION_* for cloud generation, if used."
   echo "    REPO_ROOT=$HOME/Repos"
   echo "    SUPABASE_URL=<your Supabase URL>"
   echo "    SUPABASE_SERVICE_ROLE_KEY=<your key>"
@@ -101,12 +104,9 @@ fi
 env_xml=""
 has_repo_root=0
 while IFS= read -r line || [[ -n "$line" ]]; do
-  # skip blanks and comments
-  [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-  # skip lines without =
-  [[ "$line" != *"="* ]] && continue
-  key="${line%%=*}"
-  val="${line#*=}"
+  parsed="$(parse_dotenv_line "$line")" || continue
+  key="${parsed%%=*}"
+  val="${parsed#*=}"
   # skip placeholder secrets
   [[ "$val" == "your-"* ]] && continue
   if [[ "$key" == "REPO_ROOT" ]]; then

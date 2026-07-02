@@ -21,7 +21,8 @@ from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from . import config
-from . import ollama_client, supabase_vector
+from . import supabase_vector
+from .inference import inference
 from .logger import log, request_id_var
 
 
@@ -29,11 +30,20 @@ from .logger import log, request_id_var
 async def lifespan(app: FastAPI):
     log.info("context-engine starting")
     log.info("  repo_root=%s", config.REPO_ROOT)
-    log.info("  ollama=%s  model=%s", config.OLLAMA_HOST, config.OLLAMA_MODEL)
-    log.info("  reason_model=%s", config.OLLAMA_REASON_MODEL)
-    log.info("  arch_model=%s", config.OLLAMA_ARCH_MODEL)
-    log.info("  agent_model=%s", config.OLLAMA_AGENT_MODEL)
-    log.info("  embed_model=%s", config.OLLAMA_EMBED_MODEL)
+    log.info(
+        "  generation_provider=%s endpoint=%s model=%s",
+        inference.settings.generation.name,
+        inference.settings.generation.endpoint,
+        inference.settings.fast_model,
+    )
+    log.info("  reason_model=%s", inference.settings.reasoning_model)
+    log.info("  agent_model=%s", inference.settings.agent_model)
+    log.info(
+        "  embedding_provider=%s endpoint=%s model=%s",
+        inference.settings.embedding.name,
+        inference.settings.embedding.endpoint,
+        inference.settings.embedding_model,
+    )
     log.info("  supabase=%s", config.SUPABASE_URL or "not configured")
     log.info("  log_level=%s", config.LOG_LEVEL)
     log.info("context-engine ready on :8088")
@@ -129,12 +139,13 @@ async def health():
     Full health status. Always returns HTTP 200 — check 'status' field.
     Use /healthcheck for monitoring (returns 503 when critical services are down).
     """
-    models         = await ollama_client.list_models()
-    model_ok       = any(config.OLLAMA_MODEL        in m for m in models)
-    reason_ok      = any(config.OLLAMA_REASON_MODEL in m for m in models)
-    arch_ok        = any(config.OLLAMA_ARCH_MODEL   in m for m in models)
-    agent_ok       = any(config.OLLAMA_AGENT_MODEL  in m for m in models)
-    embed_ok       = any(config.OLLAMA_EMBED_MODEL  in m for m in models)
+    models         = await inference.list_models()
+    embed_models   = await inference.list_embedding_models()
+    model_ok       = any(inference.settings.fast_model in m for m in models)
+    reason_ok      = any(inference.settings.reasoning_model in m for m in models)
+    arch_ok        = any(inference.settings.agent_model in m for m in models)
+    agent_ok       = any(inference.settings.agent_model in m for m in models)
+    embed_ok       = any(inference.settings.embedding_model in m for m in embed_models)
     supabase_ok    = await supabase_vector.is_supabase_reachable()
     vector_ok      = await supabase_vector.is_available()
     repo_mounted   = config.REPO_ROOT.exists() and config.REPO_ROOT.is_dir()
@@ -147,16 +158,16 @@ async def health():
     return {
         "status":                 status,
         "ollama":                 len(models) > 0,
-        "ollama_host":            config.OLLAMA_HOST,
-        "code_model":             config.OLLAMA_MODEL,
+        "ollama_host":            inference.settings.generation.endpoint,
+        "code_model":             inference.settings.fast_model,
         "code_model_available":   model_ok,
-        "reason_model":           config.OLLAMA_REASON_MODEL,
+        "reason_model":           inference.settings.reasoning_model,
         "reason_model_available": reason_ok,
-        "arch_model":             config.OLLAMA_ARCH_MODEL,
+        "arch_model":             inference.settings.agent_model,
         "arch_model_available":   arch_ok,
-        "agent_model":            config.OLLAMA_AGENT_MODEL,
+        "agent_model":            inference.settings.agent_model,
         "agent_model_available":  agent_ok,
-        "embed_model":            config.OLLAMA_EMBED_MODEL,
+        "embed_model":            inference.settings.embedding_model,
         "embed_model_available":  embed_ok,
         "available_models":       models,
         "supabase":               supabase_ok,
@@ -180,13 +191,13 @@ async def healthcheck():
     curl http://localhost:8088/healthcheck → {"ok": true} or {"ok": false, "reason": "..."}
     """
     from fastapi import Response as _Resp
-    models       = await ollama_client.list_models()
-    model_ok     = any(config.OLLAMA_MODEL in m for m in models)
+    models       = await inference.list_models()
+    model_ok     = any(inference.settings.fast_model in m for m in models)
     repo_mounted = config.REPO_ROOT.exists() and config.REPO_ROOT.is_dir()
 
     if not model_ok:
         return _Resp(
-            content=f'{{"ok":false,"reason":"model {config.OLLAMA_MODEL!r} not available in Ollama"}}',
+            content=f'{{"ok":false,"reason":"model {inference.settings.fast_model!r} not available in inference provider"}}',
             status_code=503,
             media_type="application/json",
         )
@@ -196,7 +207,7 @@ async def healthcheck():
             status_code=503,
             media_type="application/json",
         )
-    return {"ok": True, "model": config.OLLAMA_MODEL, "repo": str(config.REPO_ROOT)}
+    return {"ok": True, "model": inference.settings.fast_model, "repo": str(config.REPO_ROOT)}
 
 
 # ── Debug ──────────────────────────────────────────────────────────────────────
@@ -210,16 +221,8 @@ async def debug():
     import httpx as _httpx
     from datetime import datetime, timezone
 
-    # --- Ollama: which model is currently loaded ---
-    loaded_model = None
-    try:
-        async with _httpx.AsyncClient(timeout=5.0) as c:
-            r = await c.get(f"{config.OLLAMA_HOST}/api/ps")
-            if r.status_code == 200:
-                models_loaded = r.json().get("models", [])
-                loaded_model = [m["name"] for m in models_loaded] or None
-    except Exception:
-        pass
+    # Preserve the legacy field while querying through the inference boundary.
+    loaded_model = await inference.loaded_embedding_models() or None
 
     # --- Supabase: row count in vector table ---
     vector_row_count = None
@@ -267,6 +270,10 @@ async def debug():
         "ollama_timeout":       config.OLLAMA_TIMEOUT,
         "ollama_num_ctx":       config.OLLAMA_NUM_CTX,
         "ollama_num_predict":   config.OLLAMA_NUM_PREDICT,
+        "generation_provider":  inference.settings.generation.name,
+        "generation_endpoint":  inference.settings.generation.endpoint,
+        "embedding_provider":   inference.settings.embedding.name,
+        "embedding_endpoint":   inference.settings.embedding.endpoint,
         "supabase_url":         config.SUPABASE_URL or "not set",
         "supabase_key_set":     bool(supa_key and supa_key != "your-service-role-key-here"),
         "vector_table":         config.SUPABASE_VECTOR_TABLE,
@@ -304,11 +311,12 @@ async def setup():
     This endpoint is intentionally context-safe: it teaches retrieval behavior
     without embedding a full configuration manual into the caller's session.
     """
-    models     = await ollama_client.list_models()
-    model_ok   = any(config.OLLAMA_MODEL       in m for m in models)
-    arch_ok    = any(config.OLLAMA_ARCH_MODEL   in m for m in models)
-    reason_ok  = any(config.OLLAMA_REASON_MODEL in m for m in models)
-    embed_ok   = any(config.OLLAMA_EMBED_MODEL  in m for m in models)
+    models       = await inference.list_models()
+    embed_models = await inference.list_embedding_models()
+    model_ok   = any(inference.settings.fast_model in m for m in models)
+    arch_ok    = any(inference.settings.agent_model in m for m in models)
+    reason_ok  = any(inference.settings.reasoning_model in m for m in models)
+    embed_ok   = any(inference.settings.embedding_model in m for m in embed_models)
     vec_ok     = await supabase_vector.is_available()
     repo       = str(config.REPO_ROOT)
     base       = "http://localhost:8088"
@@ -353,11 +361,43 @@ async def setup():
         "When coding is in play, update the repo's agent-facing files as applicable: "
         "`AGENTS.md`, `CLAUDE.md`, `.claude/rules/*`, MCP config, slash commands, "
         "skills, hooks, or local scripts. Keep those integrations aligned with the "
-        "`find -> read -> act` workflow below.\n\n"
+        "`find -> assess -> read -> act -> verify` workflow below.\n\n"
 
         "## Recommended Workflow\n\n"
+        "### Path Contract\n\n"
+        "Every repository path must be relative to `REPO_ROOT` and include the "
+        "`owner/repo` prefix. Do not pass bare `src`, `app/api`, `.`, or absolute "
+        "filesystem paths.\n\n"
+        "Good:\n\n"
+        "```text\n"
+        "ascendvent/checkin-ascendvent/app/clients/[id]\n"
+        "ryemyster/context-manager/context-engine/app\n"
+        "```\n\n"
+        "Bad:\n\n"
+        "```text\n"
+        "app/clients/[id]\n"
+        "/Users/name/Repos/owner/repo/app\n"
+        ".\n"
+        "```\n\n"
+        "Wrong or overly broad paths cause low-quality retrieval, wasted agent "
+        "iterations, and apparent MCP timeouts.\n\n"
+
+        "### Choose the Smallest Tool\n\n"
+        "`load_context` / `POST /context` is the default first pass for bounded "
+        "pre-task inventory. It uses the fast code model and usually completes "
+        "interactively.\n\n"
+        "`investigate_codebase` / `POST /agents/run` is a deep junior-agent loop. "
+        "Use it only when the task needs multi-step investigation, planning, "
+        "memory, verification, or repair passes. It can take 10–50 minutes and "
+        "may exceed MCP host timeouts even while the local background run is still "
+        "polling.\n\n"
+        "For quick component/API questions, prefer `load_context` with scoped paths "
+        "and focus terms before escalating to `investigate_codebase`.\n\n"
+
         "### Step 1: Discover\n\n"
         "Use:\n\n"
+        "- `load_context` / `/context` for bounded pre-task inventory\n"
+        "- `investigate_codebase` / `/agents/run` only for deep multi-step investigation\n"
         "- `/find`\n"
         "- `/vector-search`\n"
         "- `/scan`\n\n"
@@ -374,20 +414,23 @@ async def setup():
         "{\"path\":\"owner/repo/src/app/api\",\"mode\":\"context_safe\",\"max_results\":10}\n"
         "```\n\n"
 
-        "### Step 2: Narrow\n\n"
-        "Use:\n\n"
-        "- scores\n"
-        "- summaries\n"
-        "- metadata\n"
-        "- paths\n\n"
-        "Select only the most relevant items. Prefer high-score references with "
-        "specific paths and summaries that directly match the task.\n\n"
+        "### Step 2: Assess Confidence (gate)\n\n"
+        "Before reading anything, decide:\n\n"
+        "**HIGH confidence → proceed to Step 3:**\n\n"
+        "- ≥1 artifact with a matching path\n"
+        "- Specific file or symbol located\n"
+        "- Scope ≤3 files\n\n"
+        "**LOW confidence → escalate in order:**\n\n"
+        "1. One re-call without `mode=context_safe`\n"
+        "2. Spawn an Explore subagent\n"
+        "3. Ask the user\n\n"
+        "**LOW signals:** 0 artifacts returned, unrelated paths, symbol not found, scope >5 files.\n\n"
 
         "### Step 3: Read\n\n"
         "Use:\n\n"
         "- `/read`\n"
         "- equivalent content endpoint\n\n"
-        "Only read selected artifacts.\n\n"
+        "Read 1–3 artifacts max.\n\n"
         "Prefer summary mode.\n\n"
         "Use full mode only when implementation requires exact details.\n\n"
         "Example request:\n\n"
@@ -399,8 +442,12 @@ async def setup():
         "Perform work using the minimal required context. Verify cited source files "
         "before making repository changes or final claims.\n\n"
 
-        "### Step 5: Refresh\n\n"
-        "Repeat discovery if context becomes stale.\n\n"
+        "### Step 5: Verify\n\n"
+        "After every Edit or Write, call `/diff-summary` with `git diff HEAD`.\n\n"
+        "Do not skip this step. It is a required gate, not an optional review.\n\n"
+
+        "### Step 6: Refresh if Stale\n\n"
+        "If follow-up edits shift scope, repeat from Step 1.\n\n"
         "Do not preload repositories.\n\n"
 
         "## Anti-Patterns\n\n"
@@ -414,11 +461,11 @@ async def setup():
         "## Claude Code Guidance\n\n"
         "Preferred:\n\n"
         "```text\n"
-        "find -> read -> act\n"
+        "find → assess → read → act → verify\n"
         "```\n\n"
         "Not:\n\n"
         "```text\n"
-        "scan everything -> read everything -> act\n"
+        "scan everything → read everything → act\n"
         "```\n\n"
 
         "## Context Budget Guidance\n\n"
@@ -482,17 +529,16 @@ async def setup():
         "for judgment or implementation.\n\n"
 
         "## Timing Reference\n\n"
-        "Benchmarked on Apple Silicon (M-series, local Ollama). All estimates are "
-        "from real benchmark runs. Timeouts are set to benchmark max × 1.1 (upper bound + 10% headroom). "
-        "Variance is high — thermal state, memory pressure, and model-swap overhead can shift wall time 2–3×. "
-        "Always poll async endpoints; never assume synchronous completion.\n\n"
-        "**Three-tier model routing:**\n\n"
-        "| Tier | Model | Workload | Benchmark range | Timeout |\n"
-        "|---|---|---|---|---|\n"
-        f"| Default | `{config.OLLAMA_MODEL}` | Code reading, pattern matching, grep synthesis | <1s–123s | {int(config.OLLAMA_TIMEOUT)}s |\n"
-        f"| Architecture review | `{config.OLLAMA_ARCH_MODEL}` | Structural analysis, design review, cross-repo reasoning, agent runs | 10s–563s | {int(config.OLLAMA_ARCH_TIMEOUT)}s |\n"
-        f"| Deep reasoning | `{config.OLLAMA_REASON_MODEL}` | Risk analysis, governance, organizational reasoning | 1s–520s | {int(config.OLLAMA_REASON_TIMEOUT)}s |\n"
-        f"| Embeddings | `{config.OLLAMA_EMBED_MODEL}` | Semantic search indexing | 2–5s (+30s if code model loaded) | — |\n\n"
+        "Latency depends on the configured providers. Existing timeout values retain "
+        "the conservative local-Ollama budgets for backwards compatibility. Always "
+        "poll async endpoints; never assume synchronous completion.\n\n"
+        "**Role-based model routing:**\n\n"
+        "| Role | Provider | Model | Workload |\n"
+        "|---|---|---|---|\n"
+        f"| Fast | `{inference.settings.generation.name}` | `{inference.settings.fast_model}` | Code reading, pattern matching, grep synthesis |\n"
+        f"| Agent | `{inference.settings.generation.name}` | `{inference.settings.agent_model}` | Structural analysis and agent runs |\n"
+        f"| Reasoning | `{inference.settings.generation.name}` | `{inference.settings.reasoning_model}` | Diff and risk analysis |\n"
+        f"| Embeddings | `{inference.settings.embedding.name}` | `{inference.settings.embedding_model}` | Semantic search and indexing |\n\n"
         "**Workload classes:**\n\n"
         "Interactive (expect <2 min, safe to await synchronously):\n"
         "`/scan` `/find` `/routes` `/dependencies` `/vector-search` `/summarize`\n\n"
@@ -502,29 +548,27 @@ async def setup():
         "| Endpoint | Model tier | Typical | Hard timeout | Notes |\n"
         "|---|---|---|---|---|\n"
         "| `/health` `/healthcheck` `/setup` | none | <1s | — | Always fast |\n"
-        f"| `/vector-search` | embed | 2–5s | — | +30s if `{config.OLLAMA_MODEL}` is loaded |\n"
-        f"| `/scan` `/find` | default (`{config.OLLAMA_MODEL}`) | <30s | {int(config.OLLAMA_TIMEOUT)}s | Interactive |\n"
-        f"| `/routes` `/dependencies` | default (`{config.OLLAMA_MODEL}`) | <30s | {int(config.OLLAMA_TIMEOUT)}s | Interactive |\n"
-        f"| `/summarize` `/context` `/draft` `/scaffold` | default (`{config.OLLAMA_MODEL}`) | <2 min | {int(config.OLLAMA_TIMEOUT)}s | Interactive |\n"
-        f"| `/diff-summary` | deep reasoning (`{config.OLLAMA_REASON_MODEL}`) | 4–9 min | {int(config.OLLAMA_REASON_TIMEOUT)}s | Background; poll or fire-and-forget |\n"
-        f"| `/agents/run` | arch review (`{config.OLLAMA_ARCH_MODEL}`, multi-turn) | 10–50 min | {int(config.OLLAMA_AGENT_TIMEOUT)}s total / {int(config.OLLAMA_AGENT_CALL_TIMEOUT)}s per call | Background; poll `/agents/run/status/{{run_id}}` every 10–30s |\n"
-        f"| `/agents/issue-auditor/run` | arch review (`{config.OLLAMA_ARCH_MODEL}`, multi-turn) | 10–50 min | {int(config.OLLAMA_AGENT_TIMEOUT)}s total / {int(config.OLLAMA_AGENT_CALL_TIMEOUT)}s per call | Background; same loop as `/agents/run` |\n\n"
+        f"| `/vector-search` | embed (`{inference.settings.embedding_model}`) | provider-dependent | 90s | Preserves the configured embedding corpus |\n"
+        f"| `/scan` `/find` `/routes` `/dependencies` | fast (`{inference.settings.fast_model}`) | provider-dependent | {int(config.OLLAMA_TIMEOUT)}s | Interactive |\n"
+        f"| `/summarize` `/context` `/draft` `/scaffold` | fast (`{inference.settings.fast_model}`) | provider-dependent | {int(config.OLLAMA_TIMEOUT)}s | Interactive |\n"
+        f"| `/diff-summary` | reasoning (`{inference.settings.reasoning_model}`) | provider-dependent | {int(config.OLLAMA_REASON_TIMEOUT)}s | Background; poll or fire-and-forget |\n"
+        f"| `/agents/run` | agent (`{inference.settings.agent_model}`, multi-turn) | provider-dependent | {int(config.OLLAMA_AGENT_TIMEOUT)}s total / {int(config.OLLAMA_AGENT_CALL_TIMEOUT)}s per call | Background; poll `/agents/run/status/{{run_id}}` every 10–30s |\n"
+        f"| `/agents/issue-auditor/run` | agent (`{inference.settings.agent_model}`, multi-turn) | provider-dependent | {int(config.OLLAMA_AGENT_TIMEOUT)}s total / {int(config.OLLAMA_AGENT_CALL_TIMEOUT)}s per call | Background; same loop as `/agents/run` |\n\n"
         "**Rules for orchestrators (Claude, Codex, GPT, Agy):**\n\n"
         "- Interactive endpoints: await directly, expect <2 min.\n"
         "- Background endpoints: fire and poll. Never block your context on them.\n"
         f"- Agent runs: submit, get `run_id`, poll `/agents/run/status/{{run_id}}` every 10–30s. Total budget is {int(config.OLLAMA_AGENT_TIMEOUT)}s ({int(config.OLLAMA_AGENT_TIMEOUT)//60} min); each model call may take up to {int(config.OLLAMA_AGENT_CALL_TIMEOUT)}s.\n"
-        "- Select and verify steps inside agent runs use the fast default model — only answer generation uses the arch model.\n"
-        "- After any long call, budget an extra 30s before calling `/vector-search` — embed model needs to swap in.\n"
-        "- First call of a session is slowest — cold model load adds 20–60s on top of generation.\n"
+        "- Structured selection and answer generation use the agent model; native tool-call fallback and verification use their configured roles.\n"
+        "- Local providers may incur cold-load or model-swap latency.\n"
         "- If a call exceeds its timeout, the server returns a 504 or partial result with `stopped_reason: timeout`. Treat that as a signal to retry with a narrower task, not to increase client timeout.\n\n"
 
         "## Live Status\n\n"
         "| Capability | Model | Status |\n"
         "|---|---|---|\n"
-        f"| Code model (default, interactive) | `{config.OLLAMA_MODEL}` | {gen_status} |\n"
-        f"| Arch review model (agent runs) | `{config.OLLAMA_ARCH_MODEL}` | {arch_status} |\n"
-        f"| Deep reasoning (`/diff-summary`) | `{config.OLLAMA_REASON_MODEL}` | {reason_status} |\n"
-        f"| Embeddings | `{config.OLLAMA_EMBED_MODEL}` | {emb_status} |\n"
+        f"| Code model (default, interactive) | `{inference.settings.fast_model}` | {gen_status} |\n"
+        f"| Arch review model (agent runs) | `{inference.settings.agent_model}` | {arch_status} |\n"
+        f"| Deep reasoning (`/diff-summary`) | `{inference.settings.reasoning_model}` | {reason_status} |\n"
+        f"| Embeddings | `{inference.settings.embedding_model}` | {emb_status} |\n"
         f"| Vector index | — | {vec_status} |\n"
     )
 
@@ -655,7 +699,7 @@ async def find(req: FindRequest):
         prompt = f"""Query: "{req.query}"
 Files: {snippet_block}
 Where is "{req.query}" implemented? Key files? (2-3 sentences)"""
-        synthesis = await ollama_client.generate(prompt)
+        synthesis = await inference.generate(prompt)
     else:
         synthesis = "No matches found for query."
 
@@ -726,7 +770,7 @@ async def routes(req: RoutesRequest = Body(default_factory=RoutesRequest)):
         snippet_block = build_snippet_block(route_snippets)
         prompt = f"""Next.js routes. One line each: HTTP method, auth required, what it does.
 {snippet_block}"""
-        analysis = await ollama_client.generate(prompt)
+        analysis = await inference.generate(prompt)
     else:
         analysis = "No API route files detected."
 
@@ -879,8 +923,8 @@ File: {req.file}
 Respond with exactly this structure:
 {{"purpose":"one sentence: what this file does","dependencies":["dep1","dep2"],"risks":["risk1"],"architectural_notes":["note1"]}}"""
 
-    raw    = await ollama_client.generate(prompt)
-    parsed = ollama_client.parse_json_response(raw)
+    raw    = await inference.generate(prompt)
+    parsed = inference.parse_json_response(raw)
 
     purpose    = parsed.get("purpose",               raw[:300] if not parsed else "")
     deps       = parsed.get("dependencies",           det_deps)
@@ -1207,7 +1251,7 @@ async def vector_search(req: VectorSearchRequest):
             available=False,
         )
 
-    embedding = await ollama_client.embed(req.query)
+    embedding = await inference.embed(req.query)
     if embedding is None:
         log.warning("POST /vector-search embed failed query=%r", req.query)
         full_payload = {
@@ -1312,7 +1356,7 @@ async def index(req: IndexRequest):
                         skipped += 1
                         continue
 
-                    embedding = await ollama_client.embed(f"{rp}\n{chunk}")
+                    embedding = await inference.embed(f"{rp}\n{chunk}")
                     if embedding is None:
                         errors += 1
                         continue
@@ -1394,7 +1438,7 @@ File: {req.file}
 
 Return the complete new file only. No explanation."""
 
-    code = await ollama_client.generate(prompt)
+    code = await inference.generate(prompt)
 
     # Strip accidental markdown fences the model may add despite instructions
     import re as _re
@@ -1469,7 +1513,7 @@ File: {sf.file}
 
 Return the complete new file only. No explanation."""
 
-            code = await ollama_client.generate(prompt)
+            code = await inference.generate(prompt)
 
             import re as _re
             code = _re.sub(r"^```[a-z]*\n?", "", code.strip(), flags=_re.MULTILINE)

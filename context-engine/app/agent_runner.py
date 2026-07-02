@@ -1,7 +1,7 @@
 """
 agent_runner.py — core agentic loop.
 
-Coordinates ollama_client.chat_with_tools() and tool_registry.execute_tool()
+Coordinates inference.chat_with_tools() and tool_registry.execute_tool()
 so the model can autonomously call tools until it has a final answer.
 
 No FastAPI dependency — pure async Python. Import and await run_agent().
@@ -16,7 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import config
-from . import ollama_client, tool_registry
+from . import tool_registry
+from .inference import inference
 from .logger import log
 
 _BASE_SYSTEM_PROMPT = (
@@ -306,7 +307,7 @@ async def _execute_loop(
         has_tool_evidence = any(msg.get("role") == "tool" for msg in messages)
         if tool_defs:
             selection_timeout = min(config.OLLAMA_AGENT_SELECT_TIMEOUT, remaining)
-            selected = await ollama_client.select_tool_call(
+            selected = await inference.select_tool_call(
                 messages,
                 tool_defs,
                 timeout=selection_timeout,
@@ -331,7 +332,7 @@ async def _execute_loop(
                     for call in tool_calls_made
                 )
                 if duplicate:
-                    synthesized = await ollama_client.answer_from_evidence(
+                    synthesized = await inference.answer_from_evidence(
                         messages,
                         model=model,
                         timeout=selection_timeout,
@@ -370,14 +371,14 @@ async def _execute_loop(
                     i + 1,
                     selected["error"],
                 )
-                message = await ollama_client.chat_with_tools(
+                message = await inference.chat_with_tools(
                     messages,
                     tool_defs,
                     model=model,
                     timeout=call_timeout,
                 )
         else:
-            message = await ollama_client.chat_with_tools(
+            message = await inference.chat_with_tools(
                 messages,
                 tool_defs,
                 model=model,
@@ -413,7 +414,7 @@ async def _execute_loop(
             fallback_remaining = budget - (time.monotonic() - t_start)
             fallback_timeout = min(config.OLLAMA_AGENT_SELECT_TIMEOUT, fallback_remaining)
             if fallback_timeout > 0:
-                selected = await ollama_client.select_tool_call(
+                selected = await inference.select_tool_call(
                     messages,
                     tool_defs,
                     model=model,
@@ -539,7 +540,7 @@ async def _verify_answer(
 
     try:
         parsed = await asyncio.wait_for(
-            ollama_client.verify_agent_answer(
+            inference.verify_agent_answer(
                 prompt,
                 timeout=config.OLLAMA_AGENT_VERIFY_TIMEOUT,
             ),

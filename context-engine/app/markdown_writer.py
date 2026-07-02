@@ -16,6 +16,7 @@ Keep output concise — Claude reads this to orient, then verifies source.
 from datetime import datetime, timezone
 from pathlib import Path
 from . import config
+from .inference import inference
 
 
 def ts() -> str:
@@ -62,7 +63,7 @@ def write_scan(
 ) -> str:
     slug = path.replace("/", "-").strip("-") or "root"
     content = f"""# Scan: `{path or "/"}`
-_Generated: {ts()} — Model: {config.OLLAMA_MODEL}_
+_Generated: {ts()} — Model: {inference.settings.fast_model}_
 
 ## Summary
 {summary}
@@ -191,7 +192,7 @@ def write_summary(
 ) -> str:
     slug = file.replace("/", "-").replace(".", "-")[:50]
     content = f"""# File Summary: `{file}`
-_Generated: {ts()} — Model: {config.OLLAMA_MODEL}_
+_Generated: {ts()} — Model: {inference.settings.fast_model}_
 
 ## Purpose
 {purpose}
@@ -270,7 +271,7 @@ def write_context(
 
     content = f"""# Context Bundle
 _Task: {task}_
-_Generated: {ts()} — Model: {config.OLLAMA_MODEL}_
+_Generated: {ts()} — Model: {inference.settings.fast_model}_
 
 ## Summary
 {summary}
@@ -310,7 +311,7 @@ def write_diff(
     from hashlib import md5
     slug = md5(summary[:100].encode()).hexdigest()[:8]
     content = f"""# Diff Summary
-_Generated: {ts()} — Model: {config.OLLAMA_MODEL}_
+_Generated: {ts()} — Model: {inference.settings.reasoning_model}_
 
 ## Summary
 {summary}
@@ -356,7 +357,7 @@ def write_draft(file: str, task: str, mode: str, code: str) -> str:
     ext  = Path(file).suffix or ".txt"
     content = f"""# Draft: `{file}`
 _Task: {task}_
-_Generated: {ts()} — Mode: {mode} — Model: {config.OLLAMA_MODEL}_
+_Generated: {ts()} — Mode: {mode} — Model: {inference.settings.fast_model}_
 
 ## Generated Code
 ```{ext.lstrip(".")}
@@ -377,7 +378,7 @@ def write_scaffold_file(file: str, task: str, spec: str, mode: str, code: str) -
     content = f"""# Scaffold: `{file}`
 _Task: {task}_
 _Spec: {spec}_
-_Generated: {ts()} — Mode: {mode} — Model: {config.OLLAMA_MODEL}_
+_Generated: {ts()} — Mode: {mode} — Model: {inference.settings.fast_model}_
 
 ## Generated Code
 ```{ext.lstrip(".")}
@@ -413,7 +414,7 @@ def write_agent_run(
 
     content = f"""# Agent Run
 _Task: {task}_
-_Generated: {ts()} — Model: {config.OLLAMA_REASON_MODEL}_
+_Generated: {ts()} — Model: {inference.settings.agent_model}_
 
 ## Final Answer
 {final_answer or "_no answer returned_"}

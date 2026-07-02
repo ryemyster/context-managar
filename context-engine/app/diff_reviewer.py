@@ -9,7 +9,7 @@ Risk analysis and test recommendations are judgment — not code pattern matchin
 import re
 import time
 from . import config
-from . import ollama_client
+from .inference import inference
 
 FILE_HEADER_PATTERN = re.compile(r'^(?:---|\+\+\+)\s+(?:[ab]/)?(.+)$', re.MULTILINE)
 
@@ -54,11 +54,11 @@ Respond with exactly:
     prompt_build_ms = int((time.monotonic() - t_prompt) * 1000)
 
     t_model = time.monotonic()
-    raw = await ollama_client.generate_reasoning(prompt)
+    raw = await inference.generate_reasoning(prompt)
     model_ms = int((time.monotonic() - t_model) * 1000)
 
     model_error = raw.startswith("[")
-    parsed = ollama_client.parse_json_response(raw)
+    parsed = inference.parse_json_response(raw)
 
     return {
         "summary":              parsed.get("summary", raw[:300] if model_error else ""),

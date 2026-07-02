@@ -12,7 +12,7 @@ context-engine/
   app/
     main.py            — all routes + /setup doc (update /setup when adding endpoints)
     config.py          — env vars and constants — single source of truth
-    ollama_client.py   — generate() · generate_reasoning() · embed()
+    inference/         — provider-neutral generation, chat, and embeddings
     models.py          — Pydantic request/response models
     markdown_writer.py — write_*() per endpoint + LRU eviction (_evict_if_needed)
     supabase_vector.py — pgvector client + store_artifact() background indexer
@@ -34,19 +34,23 @@ config/                — Claude Code and Codex MCP configuration examples
 docs/mcp-integration.md — MCP tools, installation, examples, and curl migration
 ```
 
-## Four-model stack
+## Inference roles
 
-| Model | Env var | Timeout | Used by |
-|-------|---------|---------|---------|
-| `qwen3.5:9b` | `OLLAMA_REASON_MODEL` | 600s | `/diff-summary` |
-| `qwen3:4b` | `OLLAMA_ARCH_MODEL` / `OLLAMA_AGENT_MODEL` | 650s/call, 3000s total | `/agents/run` answer generation (multi-turn) |
-| `qwen2.5-coder:3b` | `OLLAMA_AGENT_SELECT_MODEL` / `OLLAMA_AGENT_VERIFY_MODEL` | 45s / 60s | `/agents/run` structured selection and verification |
-| `qwen2.5-coder:3b` | `OLLAMA_MODEL` | 150s | `/context`, `/draft`, `/scaffold`, `/scan`, `/find`, `/summarize` |
-| `nomic-embed-text` | `OLLAMA_EMBED_MODEL` | — | `/index`, `/vector-search`, `/context` (vector step) |
+| Role | Configuration | Used by |
+|------|---------------|---------|
+| Reasoning | `INFERENCE_REASONING_MODEL` | `/diff-summary` |
+| Agent | `INFERENCE_AGENT_MODEL` | `/agents/run` structured selection and answer generation |
+| Selection fallback / verification | `INFERENCE_SELECTION_MODEL` / `INFERENCE_VERIFICATION_MODEL` | `/agents/run` fallback tool calling and evidence verification |
+| Fast | `INFERENCE_FAST_MODEL` | `/context`, `/draft`, `/scaffold`, `/scan`, `/find`, `/summarize` |
+| Embedding | `INFERENCE_EMBEDDING_MODEL` | `/index`, `/vector-search`, `/context` |
 
-Timeouts are set to benchmark max × 1.1 (upper bound + 10% headroom). Benchmarked on Apple Silicon M-series.
+The `INFERENCE_*` values fall back to the existing `OLLAMA_*` variables.
+Generation and embedding providers are configured independently. Keep
+embeddings on Ollama with `nomic-embed-text` unless intentionally migrating and
+re-indexing the 768-dimensional Supabase corpus. See
+`docs/inference-service.md`.
 
-**Routing rule:** `/diff-summary` → `generate_reasoning()` (risk analysis is judgment). `/agents/run` answer generation → `generate()` with `qwen3:4b` (architecture review workload). Everything else → `generate()` with `qwen2.5-coder:3b` or `embed()`. `/context` uses code model for synthesis — relevance scoring is pattern matching, not reasoning.
+Code outside `app/inference/` must not import provider implementations.
 
 ## Service management (launchd)
 
@@ -169,7 +173,7 @@ context-engine/.venv/bin/python3 -m pytest -v
 context-engine/.venv/bin/python3 -m pytest tests/test_agent_runner.py -v
 ```
 
-Tests use `unittest.mock` — no Ollama or filesystem calls. Safe to run offline.
+Tests use `unittest.mock` — no inference provider or filesystem calls. Safe to run offline.
 The venv has `include-system-site-packages = true` so system packages (httpx, pydantic, fastapi) are visible.
 
 ## Dev workflow — adding a Python dependency
@@ -300,10 +304,7 @@ investigate_codebase(
 )
 ```
 
-`investigate_codebase` is the primary workflow. It delegates to the existing
-Context Engine Agent, which owns planning, scans, reads, memory, verification,
-and repair passes. Do not replace delegation with a caller-managed chain of
-advanced MCP tools.
+`investigate_codebase` is the primary workflow: `find → assess → read → act → verify`. See `.claude/rules/context-engine.md` for the full confidence-gate decision table.
 
 REST remains available for compatibility and troubleshooting:
 

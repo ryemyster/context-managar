@@ -1,0 +1,2 @@
+Response text not saved. Set SAVE_RESPONSES=1 to capture it.
+Raw JSONL response: ./ollama-benchmarks/logs-20260616-215027/qwen3.5_9b_medium_run5.jsonl

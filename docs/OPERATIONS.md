@@ -19,11 +19,13 @@ Both auto-start on login and restart on crash (`KeepAlive=true`). No Docker. No 
 # Quick liveness check
 curl -s http://localhost:8088/healthcheck
 
-# Full health — all three Ollama models + Supabase
+# Full health — configured inference models + Supabase
 curl -s http://localhost:8088/health | python3 -m json.tool
 ```
 
-A healthy `/health` response shows `status: ok` for each model and Supabase. If any model is `error`, check Ollama with `ollama list`.
+A healthy `/health` response shows `status: ok` for each model and Supabase.
+Check the configured generation provider's model inventory; check local
+embeddings separately with `ollama list`.
 
 ---
 
@@ -240,17 +242,20 @@ Remember to set it back after your debug session — TRACE at 50 MB/rotation can
 
 ---
 
-## Model stack
+## Inference routing
 
-| Model | Env var | Used by |
-|-------|---------|---------|
-| `qwen3.5:9b` | `OLLAMA_REASON_MODEL` | `/diff-summary` |
-| `qwen2.5-coder:3b` | `OLLAMA_AGENT_MODEL` | `/agents/run` answer generation |
-| `qwen2.5-coder:3b` | `OLLAMA_AGENT_SELECT_MODEL` / `OLLAMA_AGENT_VERIFY_MODEL` | `/agents/run` structured selection and verification |
-| `qwen2.5-coder:3b` | `OLLAMA_MODEL` | `/context`, `/draft`, `/scaffold`, `/scan`, `/find`, `/summarize` |
-| `nomic-embed-text` | `OLLAMA_EMBED_MODEL` | `/index`, `/vector-search`, `/context` (vector step) |
+| Role | Env var | Used by |
+|------|---------|---------|
+| Reasoning | `INFERENCE_REASONING_MODEL` | `/diff-summary` |
+| Agent | `INFERENCE_AGENT_MODEL` | `/agents/run` structured selection and answer generation |
+| Selection fallback / verification | `INFERENCE_SELECTION_MODEL` / `INFERENCE_VERIFICATION_MODEL` | `/agents/run` fallback tool calling and evidence verification |
+| Fast | `INFERENCE_FAST_MODEL` | `/context`, `/draft`, `/scaffold`, `/scan`, `/find`, `/summarize` |
+| Embedding | `INFERENCE_EMBEDDING_MODEL` | `/index`, `/vector-search`, `/context` |
 
-**Routing rule:** `/diff-summary` → `generate_reasoning()` (judgment). Everything else → `generate()` (pattern matching) or `embed()`.
+For cloud generation, set `INFERENCE_GENERATION_PROVIDER=openai_compatible`.
+Keep `INFERENCE_EMBEDDING_PROVIDER=ollama` and
+`INFERENCE_EMBEDDING_MODEL=nomic-embed-text` to preserve the existing vector
+corpus. See `docs/inference-service.md`.
 
 ---
 
@@ -289,7 +294,8 @@ grep "context-engine starting\|Traceback\|Error\|error" \
   ~/Library/Logs/context-manager.log | tail -20
 ```
 
-Common causes: missing `.env` value, Ollama not running, port already in use.
+Common causes: missing `.env` value, inference provider unavailable, local
+embedding Ollama not running, or port already in use.
 
 ### Endpoint returns 500
 
@@ -305,7 +311,9 @@ curl -s -X POST http://localhost:8088/<endpoint> \
 
 ### Slow responses
 
-Look for `SLOW` lines in the log — they include the endpoint and elapsed ms. Common causes: Ollama model not loaded (first request cold-starts it), large file scan, or Supabase network latency.
+Look for `SLOW` lines in the log — they include the endpoint and elapsed ms.
+Common causes: provider cold starts, a local embedding model swap, a large file
+scan, or Supabase network latency.
 
 ### MCP tools not responding
 

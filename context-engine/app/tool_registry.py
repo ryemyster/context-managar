@@ -27,7 +27,8 @@ from typing import Callable
 
 from fastapi import HTTPException
 
-from . import config, ollama_client, supabase_vector
+from . import config, supabase_vector
+from .inference import inference
 from .logger import log
 from .repo_reader import read_file as _read_file
 from .repo_reader import rel_path, safe_resolve, walk_repo
@@ -415,7 +416,7 @@ async def _exec_search_memory(arguments: dict) -> ToolResult:
     try:
         if not await supabase_vector.is_available():
             return ToolResult(ok=True, data="[no memory found for this query]")
-        embedding = await ollama_client.embed(query)
+        embedding = await inference.embed(query)
         results = await supabase_vector.search(embedding, limit=limit, threshold=0.3)
     except Exception as exc:
         return ToolResult(ok=False, data=f"search_memory failed — {exc}",

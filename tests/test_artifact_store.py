@@ -66,7 +66,7 @@ class ArtifactStoreTests(unittest.TestCase):
                 with (
                     patch("app.supabase_vector.is_available", AsyncMock(return_value=True)),
                     patch("app.supabase_vector.already_indexed", AsyncMock(return_value=False)),
-                    patch("app.ollama_client.embed", AsyncMock(return_value=[0.1, 0.2])),
+                    patch("app.inference.service.inference.embed", AsyncMock(return_value=[0.1, 0.2])),
                     patch("app.supabase_vector.upsert_chunk", fake_upsert),
                 ):
                     await supabase_vector.store_artifact_record(str(record_path), source_type="context_record")

@@ -25,16 +25,16 @@ if ! docker inspect founderos-ollama > /dev/null 2>&1; then
 fi
 echo "✓ founderos-ollama is running"
 
-# Check model is available
-MODEL="${OLLAMA_MODEL:-qwen2.5-coder:3b}"
+# Ollama remains required for the existing embedding corpus.
+MODEL="${INFERENCE_EMBEDDING_MODEL:-${OLLAMA_EMBED_MODEL:-nomic-embed-text}}"
 MODEL_FOUND=$(curl -s http://localhost:11434/api/tags | grep -c "$MODEL" || true)
 if [ "$MODEL_FOUND" -eq 0 ]; then
-  echo "⚠ Model '$MODEL' not found in Ollama."
-  echo "  Run:  bash scripts/pull-model.sh"
+  echo "⚠ Embedding model '$MODEL' not found in Ollama."
+  echo "  Run: ollama pull $MODEL"
   echo "  Then re-run this script."
   exit 1
 fi
-echo "✓ Model $MODEL is available"
+echo "✓ Embedding model $MODEL is available"
 
 echo ""
 echo "→ Building and starting repo-analyzer..."

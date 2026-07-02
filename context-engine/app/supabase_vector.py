@@ -184,7 +184,7 @@ async def store_artifact(file_path: str) -> None:
         return
     try:
         from pathlib import Path
-        from . import ollama_client
+        from .inference import inference
 
         path = Path(file_path)
         if not path.exists():
@@ -200,7 +200,7 @@ async def store_artifact(file_path: str) -> None:
             h = chunk_hash(file_path, chunk)
             if await already_indexed(h):
                 continue
-            embedding = await ollama_client.embed(f"{path.name}\n{chunk}")
+            embedding = await inference.embed(f"{path.name}\n{chunk}")
             if embedding:
                 await upsert_chunk(file_path, chunk, embedding)
         log.debug("store_artifact done path=%s chunks=%d", path.name, len(chunks))
@@ -223,7 +223,7 @@ async def store_artifact_record(record_path: str, *, source_type: str = "artifac
     try:
         from pathlib import Path
         import json
-        from . import ollama_client
+        from .inference import inference
 
         path = Path(record_path)
         if not path.exists():
@@ -261,7 +261,7 @@ async def store_artifact_record(record_path: str, *, source_type: str = "artifac
             h = chunk_hash(vector_path, chunk)
             if await already_indexed(h):
                 continue
-            embedding = await ollama_client.embed(f"{vector_path}\n{chunk}")
+            embedding = await inference.embed(f"{vector_path}\n{chunk}")
             if embedding:
                 ok = await upsert_chunk(vector_path, chunk, embedding)
                 if not ok:

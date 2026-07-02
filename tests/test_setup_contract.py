@@ -20,7 +20,8 @@ async def test_setup_is_context_safe_operational_playbook():
         config.OLLAMA_REASON_MODEL,
         config.OLLAMA_EMBED_MODEL,
     ]
-    with patch("app.main.ollama_client.list_models", new_callable=AsyncMock, return_value=models), \
+    with patch("app.main.inference.list_models", new_callable=AsyncMock, return_value=models), \
+         patch("app.main.inference.list_embedding_models", new_callable=AsyncMock, return_value=models), \
          patch("app.main.supabase_vector.is_available", new_callable=AsyncMock, return_value=True):
         body = await setup()
 
@@ -34,17 +35,26 @@ async def test_setup_is_context_safe_operational_playbook():
     assert "Use references first." in body
     assert "Retrieve details only when necessary." in body
     assert "Avoid loading large artifacts into context." in body
+    assert "### Path Contract" in body
+    assert "Every repository path must be relative to `REPO_ROOT`" in body
+    assert "ascendvent/checkin-ascendvent/app/clients/[id]" in body
+    assert "Wrong or overly broad paths cause low-quality retrieval" in body
+    assert "### Choose the Smallest Tool" in body
+    assert "`load_context` / `POST /context` is the default first pass" in body
+    assert "`investigate_codebase` / `POST /agents/run` is a deep junior-agent loop" in body
+    assert "may exceed MCP host timeouts" in body
     assert "### Step 1: Discover" in body
-    assert "### Step 2: Narrow" in body
+    assert "### Step 2: Assess Confidence (gate)" in body
     assert "### Step 3: Read" in body
     assert "### Step 4: Execute" in body
-    assert "### Step 5: Refresh" in body
-    assert "find -> read -> act" in body
-    assert "scan everything -> read everything -> act" in body
+    assert "### Step 5: Verify" in body
+    assert "### Step 6: Refresh if Stale" in body
+    assert "find → assess → read → act → verify" in body
+    assert "scan everything → read everything → act" in body
     assert "Small task: 1-3 artifacts" in body
     assert "mode=context_safe" in body
     assert "two-call fallback" in body
     assert "make one re-call without the mode flag" in body
     assert "If the result is thin" in body
     assert "Token-Saving Rationale" in body
-    assert f"Code model (`{config.OLLAMA_MODEL}`) | available" in body
+    assert f"| Code model (default, interactive) | `{config.OLLAMA_MODEL}` | available |" in body

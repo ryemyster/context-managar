@@ -10,6 +10,35 @@ DetailLevel = Literal["summary", "standard", "full"]
 ResponseMode = Literal["context_safe"]
 
 
+_BARE_SOURCE_ROOTS = {
+    "app",
+    "components",
+    "context-engine",
+    "lib",
+    "pages",
+    "src",
+    "tests",
+}
+
+
+def _is_scoped_repo_path(path: str) -> bool:
+    if not path or path.startswith("/") or path in {".", "/"}:
+        return False
+    parts = [part for part in path.strip("/").split("/") if part]
+    if len(parts) < 2 or ".." in parts:
+        return False
+    return parts[0] not in _BARE_SOURCE_ROOTS
+
+
+def _validate_scoped_repo_path(path: str, field_name: str) -> str:
+    if not _is_scoped_repo_path(path):
+        raise ValueError(
+            f"{field_name} must include the owner/repo prefix relative to REPO_ROOT "
+            "(for example 'owner/repo/src')"
+        )
+    return path
+
+
 class DiscoveryOptions(BaseModel):
     detail: DetailLevel = "summary"
     mode: Optional[ResponseMode] = None
@@ -23,22 +52,58 @@ class DiscoveryOptions(BaseModel):
 class ScanRequest(DiscoveryOptions):
     path: str = ""
 
+    @field_validator("path")
+    @classmethod
+    def path_must_be_scoped(cls, v: str) -> str:
+        return _validate_scoped_repo_path(v, "path")
+
 class FindRequest(DiscoveryOptions):
     query: str
     path: str = "."
 
+    @field_validator("path")
+    @classmethod
+    def path_must_be_scoped_or_default(cls, v: str) -> str:
+        if v == ".":
+            return v
+        return _validate_scoped_repo_path(v, "path")
+
 class DependenciesRequest(DiscoveryOptions):
     path: str = "."
 
+    @field_validator("path")
+    @classmethod
+    def path_must_be_scoped_or_default(cls, v: str) -> str:
+        if v == ".":
+            return v
+        return _validate_scoped_repo_path(v, "path")
+
 class RoutesRequest(DiscoveryOptions):
     path: str = "."
+
+    @field_validator("path")
+    @classmethod
+    def path_must_be_scoped_or_default(cls, v: str) -> str:
+        if v == ".":
+            return v
+        return _validate_scoped_repo_path(v, "path")
 
 class ReadRequest(BaseModel):
     path: str
     max_chars: Optional[int] = None
 
+    @field_validator("path")
+    @classmethod
+    def path_must_be_scoped(cls, v: str) -> str:
+        return _validate_scoped_repo_path(v, "path")
+
 class SummarizeRequest(BaseModel):
     file: str
+
+    @field_validator("file")
+    @classmethod
+    def file_must_be_scoped(cls, v: str) -> str:
+        return _validate_scoped_repo_path(v, "file")
 
 class ContextRequest(BaseModel):
     task: str
@@ -50,8 +115,7 @@ class ContextRequest(BaseModel):
     @classmethod
     def paths_must_be_scoped(cls, v: list[str]) -> list[str]:
         for p in v:
-            if not p or p in (".", "/"):
-                raise ValueError(f"path {p!r} is too broad — must be scoped to a subdirectory (e.g. 'owner/repo/src')")
+            _validate_scoped_repo_path(p, f"path {p!r}")
         return v
 
 class DiffRequest(BaseModel):
@@ -80,15 +144,39 @@ class DraftRequest(BaseModel):
     context_files: list[str] = []       # additional files to read for context
     mode: str = "edit"                  # "create" | "edit"
 
+    @field_validator("file")
+    @classmethod
+    def file_must_be_scoped(cls, v: str) -> str:
+        return _validate_scoped_repo_path(v, "file")
+
+    @field_validator("context_files")
+    @classmethod
+    def context_files_must_be_scoped(cls, v: list[str]) -> list[str]:
+        for path in v:
+            _validate_scoped_repo_path(path, f"context file {path!r}")
+        return v
+
 class ScaffoldFile(BaseModel):
     file: str                           # target file path (relative to REPO_ROOT)
     spec: str                           # what this specific file should do
     mode: str = "create"                # "create" | "edit"
 
+    @field_validator("file")
+    @classmethod
+    def file_must_be_scoped(cls, v: str) -> str:
+        return _validate_scoped_repo_path(v, "file")
+
 class ScaffoldRequest(BaseModel):
     task: str                           # overall feature or task description
     files: list[ScaffoldFile]           # ordered list of files to generate
     context_files: list[str] = []       # shared reference files for all generations
+
+    @field_validator("context_files")
+    @classmethod
+    def context_files_must_be_scoped(cls, v: list[str]) -> list[str]:
+        for path in v:
+            _validate_scoped_repo_path(path, f"context file {path!r}")
+        return v
 
 
 # ── Responses ──────────────────────────────────────────────────────────────────

@@ -6,6 +6,26 @@ Do not delegate to `/draft` or `/scaffold` for novel architecture, auth/security
 **Hard constraint:** the scout is read-only. All output goes to `~/Library/Application Support/context-store/artifacts/` as Markdown.
 Always verify actual source files before editing — output files are scout reports, not ground truth.
 
+### Workflow: find → assess → read → act → verify
+
+**Step 1 — Discover:** `investigate_codebase`, `/find`, `/vector-search`, or `/scan`. Goal: candidate references, not content.
+
+**Step 2 — Assess confidence (gate):** decide before reading anything.
+- **HIGH → proceed:** ≥1 artifact with a matching path, specific file/symbol located, scope ≤3 files.
+- **LOW → escalate in order:**
+  1. One re-call without `mode=context_safe`
+  2. Spawn an Explore subagent
+  3. Ask the user
+- **LOW signals:** 0 artifacts returned, unrelated paths, symbol not found, scope >5 files.
+
+**Step 3 — Read:** 1–3 artifacts max. Prefer summary mode; full mode only when exact implementation is required.
+
+**Step 4 — Execute:** make the change with minimal loaded context.
+
+**Step 5 — Verify:** after every Edit or Write, run `review_diff` (or `POST /diff-summary`) with `git diff HEAD`. Do not skip.
+
+**Step 6 — Refresh if stale:** if follow-up edits shift scope, repeat from Step 1.
+
 ### Availability check — always first
 
 ```bash

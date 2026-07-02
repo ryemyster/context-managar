@@ -103,7 +103,7 @@ class ContextBuilderIntegrationTests(unittest.IsolatedAsyncioTestCase):
                   ]
                 }"""
 
-                with patch("app.context_builder.ollama_client.generate", AsyncMock(return_value=model_json)):
+                with patch("app.context_builder.inference.generate", AsyncMock(return_value=model_json)):
                     result = await build_context(
                         task="Read-only issue audit for issues #363-#376",
                         paths=["ryemyster/ShaleYeah/agents"],

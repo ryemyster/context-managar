@@ -30,7 +30,7 @@ async def test_find_defaults_to_reference_summary(monkeypatch):
         }
     ])
     monkeypatch.setattr(main, "read_file", lambda *a, **k: "def run_agent(task): pass")
-    monkeypatch.setattr(main.ollama_client, "generate", AsyncMock(return_value="run_agent is implemented in app.py."))
+    monkeypatch.setattr(main.inference, "generate", AsyncMock(return_value="run_agent is implemented in app.py."))
     monkeypatch.setattr(main.mw, "write_find", lambda **k: "/tmp/find.md")
     monkeypatch.setattr(main.supabase_vector, "store_artifact", AsyncMock(return_value=None))
 
@@ -49,7 +49,7 @@ async def test_find_full_preserves_legacy_payload_with_warning(monkeypatch):
         {"path": "owner/repo/app.py", "line_no": 7, "line": "def run_agent(task):"}
     ])
     monkeypatch.setattr(main, "read_file", lambda *a, **k: "def run_agent(task): pass")
-    monkeypatch.setattr(main.ollama_client, "generate", AsyncMock(return_value="summary"))
+    monkeypatch.setattr(main.inference, "generate", AsyncMock(return_value="summary"))
     monkeypatch.setattr(main.mw, "write_find", lambda **k: "/tmp/find.md")
     monkeypatch.setattr(main.supabase_vector, "store_artifact", AsyncMock(return_value=None))
 
@@ -68,7 +68,7 @@ async def test_find_truncation_reports_when_more_matches_exist(monkeypatch):
         {"path": "owner/repo/b.py", "line_no": 2, "line": "auth"},
     ])
     monkeypatch.setattr(main, "read_file", lambda *a, **k: "auth")
-    monkeypatch.setattr(main.ollama_client, "generate", AsyncMock(return_value="summary"))
+    monkeypatch.setattr(main.inference, "generate", AsyncMock(return_value="summary"))
     monkeypatch.setattr(main.mw, "write_find", lambda **k: "/tmp/find.md")
     monkeypatch.setattr(main.supabase_vector, "store_artifact", AsyncMock(return_value=None))
 
@@ -126,7 +126,7 @@ async def test_routes_summary_returns_route_references(monkeypatch):
         "layouts": [],
     })
     monkeypatch.setattr(main, "read_file", lambda *a, **k: "export function GET() {}")
-    monkeypatch.setattr(main.ollama_client, "generate", AsyncMock(return_value="GET route."))
+    monkeypatch.setattr(main.inference, "generate", AsyncMock(return_value="GET route."))
     monkeypatch.setattr(main.mw, "write_routes", lambda *a, **k: "/tmp/routes.md")
     monkeypatch.setattr(main.supabase_vector, "store_artifact", AsyncMock(return_value=None))
 
@@ -139,7 +139,7 @@ async def test_routes_summary_returns_route_references(monkeypatch):
 @pytest.mark.asyncio
 async def test_vector_search_summary_omits_chunk_content(monkeypatch):
     monkeypatch.setattr(main.supabase_vector, "is_available", AsyncMock(return_value=True))
-    monkeypatch.setattr(main.ollama_client, "embed", AsyncMock(return_value=[0.1, 0.2]))
+    monkeypatch.setattr(main.inference, "embed", AsyncMock(return_value=[0.1, 0.2]))
     monkeypatch.setattr(main.supabase_vector, "search", AsyncMock(return_value=[
         {"path": "owner/repo/app.py", "chunk": "x" * 2000, "similarity": 0.82}
     ]))
@@ -155,7 +155,7 @@ async def test_vector_search_summary_omits_chunk_content(monkeypatch):
 @pytest.mark.asyncio
 async def test_vector_search_truncation_reports_when_more_matches_exist(monkeypatch):
     monkeypatch.setattr(main.supabase_vector, "is_available", AsyncMock(return_value=True))
-    monkeypatch.setattr(main.ollama_client, "embed", AsyncMock(return_value=[0.1, 0.2]))
+    monkeypatch.setattr(main.inference, "embed", AsyncMock(return_value=[0.1, 0.2]))
     monkeypatch.setattr(main.supabase_vector, "search", AsyncMock(return_value=[
         {"path": "owner/repo/a.py", "chunk": "first", "similarity": 0.9},
         {"path": "owner/repo/b.py", "chunk": "second", "similarity": 0.8},

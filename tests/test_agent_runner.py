@@ -110,7 +110,7 @@ async def test_run_agent_stops_on_final_answer():
     """When model returns content with no tool_calls, loop stops with final_answer."""
     mock_message = {"role": "assistant", "content": "The answer is 42.", "tool_calls": []}
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]):
         mock_chat.return_value = mock_message
 
@@ -132,7 +132,7 @@ async def test_run_agent_calls_tool_and_continues():
     }
     final_msg = {"role": "assistant", "content": "Engine is healthy.", "tool_calls": []}
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
          patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""):
@@ -165,8 +165,8 @@ async def test_run_agent_uses_structured_selector_then_finishes_from_evidence():
     }
     finished = {"final_answer": "The title is Context Engine."}
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock), \
-         patch("app.agent_runner.ollama_client.select_tool_call", new_callable=AsyncMock,
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock), \
+         patch("app.agent_runner.inference.select_tool_call", new_callable=AsyncMock,
                side_effect=[selected, finished]) as mock_select, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=tool_defs), \
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
@@ -192,9 +192,9 @@ async def test_run_agent_reprompts_when_structured_selector_fails():
     }]
     prose = {"role": "assistant", "content": "I should read the file.", "tool_calls": []}
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock,
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock,
                return_value=prose), \
-         patch("app.agent_runner.ollama_client.select_tool_call", new_callable=AsyncMock,
+         patch("app.agent_runner.inference.select_tool_call", new_callable=AsyncMock,
                return_value={"error": "selection failed"}), \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=tool_defs), \
          patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""):
@@ -221,9 +221,9 @@ async def test_run_agent_synthesizes_after_duplicate_successful_tool():
         },
     }
 
-    with patch("app.agent_runner.ollama_client.select_tool_call", new_callable=AsyncMock,
+    with patch("app.agent_runner.inference.select_tool_call", new_callable=AsyncMock,
                side_effect=[selected, selected]), \
-         patch("app.agent_runner.ollama_client.answer_from_evidence", new_callable=AsyncMock,
+         patch("app.agent_runner.inference.answer_from_evidence", new_callable=AsyncMock,
                return_value={"final_answer": "The title is Context Engine."}) as mock_answer, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=tool_defs), \
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock,
@@ -256,7 +256,7 @@ async def test_run_agent_executes_text_encoded_tool_call():
     }
     final = {"role": "assistant", "content": "The title is Context Engine.", "tool_calls": []}
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=tool_defs), \
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
          patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
@@ -276,7 +276,7 @@ async def test_run_agent_preflight_skipped_when_search_memory_not_in_tools():
     """When tools list excludes search_memory, preflight is not called."""
     final_msg = {"role": "assistant", "content": "Done.", "tool_calls": []}
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value="some memory") as mock_preflight:
         mock_chat.return_value = final_msg
@@ -292,7 +292,7 @@ async def test_run_agent_memory_context_used_when_preflight_returns_content():
     final_msg = {"role": "assistant", "content": "Done.", "tool_calls": []}
     preflight_result = "Prior memory\n[0.87] some/path\nsome chunk\n\n---\n\n[0.72] other/path\nother chunk"
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=preflight_result):
         mock_chat.return_value = final_msg
@@ -312,7 +312,7 @@ async def test_run_agent_memory_preflight_is_best_effort():
         return "late memory"
 
     with patch("app.agent_runner.config.OLLAMA_AGENT_MEMORY_TIMEOUT", 0.01), \
-         patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+         patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner._preflight_memory", side_effect=stalled_preflight):
         mock_chat.return_value = final_msg
@@ -327,7 +327,7 @@ async def test_run_agent_stops_on_model_error():
     """When chat_with_tools returns an error dict, loop stops with model_error."""
     error_msg = {"error": "Ollama timeout"}
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]):
         mock_chat.return_value = error_msg
 
@@ -348,7 +348,7 @@ async def test_run_agent_stops_at_max_iterations():
         "tool_calls": [{"function": {"name": "health_check", "arguments": {}}}],
     }
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec:
         mock_chat.return_value = tool_call_msg
@@ -370,7 +370,7 @@ async def test_run_agent_timeout():
     }
 
     with patch("app.agent_runner.config.OLLAMA_AGENT_TIMEOUT", -1.0), \
-        patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+        patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
         patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""):
@@ -395,7 +395,7 @@ async def test_run_agent_coerces_string_arguments():
     }
     final_msg = {"role": "assistant", "content": "Done.", "tool_calls": []}
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec:
         mock_chat.side_effect = [tool_call_msg, final_msg]
@@ -419,7 +419,7 @@ async def test_run_agent_custom_system_prompt():
         captured_messages.extend(messages)
         return final_msg
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", side_effect=capture_chat), \
+    with patch("app.agent_runner.inference.chat_with_tools", side_effect=capture_chat), \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]):
         await run_agent("Task", system_prompt="Custom prompt for testing.", max_iterations=1)
 
@@ -433,7 +433,7 @@ async def test_run_agent_message_history_in_result():
     """Result includes full message_history for debugging."""
     final_msg = {"role": "assistant", "content": "Result.", "tool_calls": []}
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]):
         mock_chat.return_value = final_msg
 
@@ -470,7 +470,7 @@ async def test_run_agent_plan_state_captured_from_update_plan():
         "blockers": [],
     })
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
          patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""):
@@ -488,7 +488,7 @@ async def test_run_agent_plan_state_empty_when_update_plan_not_called():
     """plan_state is empty dict when the model never calls update_plan."""
     final_msg = {"role": "assistant", "content": "Done.", "tool_calls": []}
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""):
         mock_chat.return_value = final_msg
@@ -507,7 +507,7 @@ async def test_run_agent_scope_denied_serialized_to_model():
     }
     final_msg = {"role": "assistant", "content": "Cannot read files.", "tool_calls": []}
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
          patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""):
@@ -546,7 +546,7 @@ _FAIL_VERIFICATION = (
 async def test_verify_answer_passed():
     """Happy path — model returns passed=true."""
     with patch(
-        "app.agent_runner.ollama_client.verify_agent_answer",
+        "app.agent_runner.inference.verify_agent_answer",
         new_callable=AsyncMock,
         return_value={
             "passed": True,
@@ -572,7 +572,7 @@ async def test_verify_answer_passed():
 async def test_verify_answer_failed_with_unsupported_claims():
     """Verifier returns passed=false with unsupported claims."""
     with patch(
-        "app.agent_runner.ollama_client.verify_agent_answer",
+        "app.agent_runner.inference.verify_agent_answer",
         new_callable=AsyncMock,
         return_value={
             "passed": False,
@@ -597,7 +597,7 @@ async def test_verify_answer_failed_with_unsupported_claims():
 async def test_verify_answer_parse_failure_degrades_gracefully():
     """When the model returns non-JSON, result has passed=None and error=parse_failed."""
     with patch(
-        "app.agent_runner.ollama_client.verify_agent_answer",
+        "app.agent_runner.inference.verify_agent_answer",
         new_callable=AsyncMock,
         return_value={"error": "parse_failed"},
     ):
@@ -610,7 +610,7 @@ async def test_verify_answer_parse_failure_degrades_gracefully():
 @pytest.mark.asyncio
 async def test_verify_answer_exception_returns_unavailable():
     """When the schema verifier raises, result degrades to verifier_unavailable."""
-    with patch("app.agent_runner.ollama_client.verify_agent_answer",
+    with patch("app.agent_runner.inference.verify_agent_answer",
                new_callable=AsyncMock, side_effect=RuntimeError("connection refused")):
         result = await _verify_answer("task", "answer", [], {})
 
@@ -627,7 +627,7 @@ async def test_verify_answer_timeout_degrades_gracefully():
         return {"passed": True}
 
     with patch("app.agent_runner.config.OLLAMA_AGENT_VERIFY_TIMEOUT", 0.01), \
-         patch("app.agent_runner.ollama_client.verify_agent_answer", side_effect=stalled_verifier):
+         patch("app.agent_runner.inference.verify_agent_answer", side_effect=stalled_verifier):
         result = await _verify_answer("task", "answer", [], {})
 
     assert result == {"passed": None, "error": "verifier_timeout"}
@@ -647,7 +647,7 @@ async def test_verify_answer_uses_plan_goal_when_present():
             "evidence_gap": False,
         }
 
-    with patch("app.agent_runner.ollama_client.verify_agent_answer", side_effect=capture_gen):
+    with patch("app.agent_runner.inference.verify_agent_answer", side_effect=capture_gen):
         await _verify_answer(
             task="generic task",
             final_answer="answer",
@@ -664,10 +664,10 @@ async def test_run_agent_verification_populated_on_final_answer():
     """When run_agent stops with final_answer, verification dict is populated."""
     final_msg = {"role": "assistant", "content": "Routes are in main.py.", "tool_calls": []}
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
-         patch("app.agent_runner.ollama_client.verify_agent_answer", new_callable=AsyncMock) as mock_gen:
+         patch("app.agent_runner.inference.verify_agent_answer", new_callable=AsyncMock) as mock_gen:
         mock_chat.return_value = final_msg
         mock_gen.return_value = {
             "passed": True,
@@ -692,11 +692,11 @@ async def test_run_agent_verification_empty_on_max_iterations():
         "tool_calls": [{"function": {"name": "health_check", "arguments": {}}}],
     }
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
          patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
-         patch("app.agent_runner.ollama_client.generate_reasoning", new_callable=AsyncMock) as mock_gen:
+         patch("app.agent_runner.inference.generate_reasoning", new_callable=AsyncMock) as mock_gen:
         mock_chat.return_value = tool_call_msg
         mock_exec.return_value = ToolResult(ok=True, data="ok")
 
@@ -738,7 +738,7 @@ async def test_run_agent_repair_succeeds_updates_stopped_reason():
     fail_verif = {"passed": False, "rationale": "Missing evidence.", "unsupported_claims": ["claim X"]}
     pass_verif = {"passed": True, "rationale": "Evidence found.", "unsupported_claims": [], "evidence_gap": False}
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
          patch("app.agent_runner._verify_answer", new_callable=AsyncMock) as mock_verify:
@@ -762,7 +762,7 @@ async def test_run_agent_verification_failed_when_repair_also_fails():
 
     fail_verif = {"passed": False, "rationale": "Still no evidence.", "unsupported_claims": ["claim X"]}
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
          patch("app.agent_runner._verify_answer", new_callable=AsyncMock, return_value=fail_verif):
@@ -782,7 +782,7 @@ async def test_run_agent_no_repair_when_verification_passes():
     final_msg = {"role": "assistant", "content": "Good answer.", "tool_calls": []}
     pass_verif = {"passed": True, "rationale": "All good.", "unsupported_claims": [], "evidence_gap": False}
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
          patch("app.agent_runner._verify_answer", new_callable=AsyncMock, return_value=pass_verif) as mock_verify:
@@ -812,7 +812,7 @@ async def test_run_agent_repair_prompt_injected_as_user_message():
             return first_final
         return repair_final
 
-    with patch("app.agent_runner.ollama_client.chat_with_tools", side_effect=capture_chat), \
+    with patch("app.agent_runner.inference.chat_with_tools", side_effect=capture_chat), \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
          patch("app.agent_runner._verify_answer", new_callable=AsyncMock,

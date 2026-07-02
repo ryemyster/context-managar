@@ -23,7 +23,8 @@ from . import config
 from .repo_reader import walk_repo, read_file, rel_path, safe_resolve, build_snippet_block
 from .logger import log
 from .search_worker import find_in_repo
-from . import ollama_client, supabase_vector
+from . import supabase_vector
+from .inference import inference
 
 
 def _normalize_prefix(path: str) -> str:
@@ -214,7 +215,7 @@ async def build_context(
     vector_hits: list[dict] = []
     if use_vector and focus and await supabase_vector.is_available():
         embed_query = f"{task} {' '.join(focus)}"
-        embedding = await ollama_client.embed(embed_query)
+        embedding = await inference.embed(embed_query)
         if embedding:
             raw_hits = await supabase_vector.search(embedding, limit=16)
             for hit in raw_hits:
@@ -301,8 +302,8 @@ Respond with JSON only — no markdown fences:
   "audit_table": []
 }}"""
 
-    raw    = await ollama_client.generate(prompt)
-    parsed = ollama_client.parse_json_response(raw)
+    raw    = await inference.generate(prompt)
+    parsed = inference.parse_json_response(raw)
 
     summary         = parsed.get("summary",         raw[:400] if not parsed else "")
     risks           = parsed.get("risks",            [])
