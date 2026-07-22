@@ -371,7 +371,7 @@ async def test_run_agent_stops_on_model_error():
 
 @pytest.mark.asyncio
 async def test_run_agent_stops_at_max_iterations():
-    """When model always calls tools, loop stops if evidence synthesis fails."""
+    """When synthesis fails, max-iteration runs still surface gathered evidence."""
     tool_call_msg = {
         "role": "assistant",
         "content": "Still thinking...",
@@ -390,10 +390,9 @@ async def test_run_agent_stops_at_max_iterations():
 
     assert result.stopped_reason == "max_iterations"
     assert result.iterations == 3
-    assert result.final_answer == (
-        "[agent completed 3 iterations and 3 tool calls without a conclusive "
-        "answer; last tools: health_check, health_check, health_check]"
-    )
+    assert result.final_answer.startswith("Partial answer from tool evidence:")
+    assert "health_check {}" in result.final_answer
+    assert "health: ok" in result.final_answer
 
 
 @pytest.mark.asyncio

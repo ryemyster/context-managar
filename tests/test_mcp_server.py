@@ -288,6 +288,34 @@ async def test_investigate_reference_summary_marks_inconclusive_run():
 
 
 @pytest.mark.asyncio
+async def test_investigate_reference_summary_marks_partial_run_with_evidence():
+    payload = {
+        "status": "max_iterations",
+        "stopped_reason": "max_iterations",
+        "final_answer": (
+            "Partial answer from tool evidence: the agent reached the 3-iteration "
+            "limit before model synthesis completed, but it did gather evidence."
+        ),
+        "tool_calls_made": [{"name": "scan_directory"}, {"name": "grep"}],
+        "artifacts": {"event_id": "agents-run-2", "markdown": "/tmp/agent.md"},
+    }
+    with patch.object(
+        mcp.artifact_store,
+        "write_record",
+        return_value={
+            "event_id": "mcp-investigate-2",
+            "record": "/tmp/records/mcp-investigate-2.json",
+            "markdown": None,
+            "event_log": "/tmp/events.jsonl",
+        },
+    ):
+        result = mcp._reference_response("investigate_codebase", {"task": "Inspect"}, payload)
+
+    assert result["summary"].startswith("Agent run partial (max_iterations); 2 tool calls.")
+    assert "Partial answer from tool evidence" in result["summary"]
+
+
+@pytest.mark.asyncio
 async def test_inline_mode_preserves_full_large_result():
     payload = {"summary": "x" * 2000, "written_to": "/tmp/context-bundle.md"}
     with (

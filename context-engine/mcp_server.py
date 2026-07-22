@@ -586,6 +586,12 @@ def _summarize_payload(name: str, payload: dict[str, Any]) -> str:
         status = payload.get("status") or stopped or "complete"
         answer = _first_text(payload.get("final_answer"), limit=180)
         if stopped and stopped != "final_answer":
+            partial = answer and not answer.startswith("[agent completed")
+            if partial:
+                return (
+                    f"Agent run partial ({stopped}); {calls} tool calls. "
+                    f"{answer}"
+                ).strip()
             return (
                 f"Agent run inconclusive ({stopped}); {calls} tool calls. "
                 f"Diagnostic: {answer}"

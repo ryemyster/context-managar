@@ -132,6 +132,28 @@ def _inconclusive_answer(max_iter: int, tool_calls_made: list[dict]) -> str:
     )
 
 
+def _partial_answer_from_evidence(max_iter: int, tool_calls_made: list[dict]) -> str:
+    """Return a deterministic, evidence-only answer when model synthesis fails."""
+    if not tool_calls_made:
+        return ""
+
+    evidence_lines = []
+    for call in tool_calls_made[-6:]:
+        name = str(call.get("name") or "unknown")
+        arguments = call.get("arguments") or {}
+        result = " ".join(str(call.get("result") or "").split())
+        if len(result) > 240:
+            result = result[:240].rstrip() + "..."
+        evidence_lines.append(f"- {name} {arguments}: {result}")
+
+    return (
+        f"Partial answer from tool evidence: the agent reached the {max_iter}-iteration "
+        "limit before model synthesis completed, but it did gather the following "
+        "repository evidence:\n"
+        + "\n".join(evidence_lines)
+    )
+
+
 def _tool_names(tool_defs: list[dict]) -> list[str]:
     return [
         schema.get("function", {}).get("name", "")
@@ -663,7 +685,10 @@ async def _execute_loop(
                     max_iter,
                 )
         if not final_answer:
-            final_answer = _inconclusive_answer(max_iter, tool_calls_made)
+            final_answer = (
+                _partial_answer_from_evidence(max_iter, tool_calls_made)
+                or _inconclusive_answer(max_iter, tool_calls_made)
+            )
 
     return final_answer, stopped_reason, iterations_done, tool_calls_made, plan_state
 
