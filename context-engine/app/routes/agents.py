@@ -299,13 +299,21 @@ async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
         )
         return
     try:
+        warnings = []
+        if result.stopped_reason != "final_answer":
+            warnings.append(
+                f"agent stopped with {result.stopped_reason}; final_answer is diagnostic, not a verified answer"
+            )
+        if result.stopped_reason == "final_answer" and result.verification.get("passed") is not True:
+            warnings.append("final_answer was not positively verified")
+
         written = mw.write_agent_run(
             task=req.task,
             final_answer=result.final_answer,
             tool_calls_made=result.tool_calls_made,
             iterations=result.iterations,
             stopped_reason=result.stopped_reason,
-            warnings=[],
+            warnings=warnings,
         )
         markdown_content = ""
         try:
@@ -321,7 +329,7 @@ async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
             "tool_calls_made":      result.tool_calls_made,
             "iterations":           result.iterations,
             "stopped_reason":       result.stopped_reason,
-            "warnings":             [],
+            "warnings":             warnings,
             "memory_context_used":  result.memory_context_used,
             "memory_hits":          result.memory_hits,
             "plan_state":           result.plan_state,

@@ -389,6 +389,10 @@ async def test_run_agent_stops_at_max_iterations():
 
     assert result.stopped_reason == "max_iterations"
     assert result.iterations == 3
+    assert result.final_answer == (
+        "[agent completed 3 iterations and 3 tool calls without a conclusive "
+        "answer; last tools: health_check, health_check, health_check]"
+    )
 
 
 @pytest.mark.asyncio

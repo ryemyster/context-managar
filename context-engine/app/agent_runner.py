@@ -114,6 +114,21 @@ def _looks_like_tool_intent_answer(content: str) -> bool:
     return any(phrase in text for phrase in intent_phrases)
 
 
+def _inconclusive_answer(max_iter: int, tool_calls_made: list[dict]) -> str:
+    """Return a clear non-answer when the loop exhausts before synthesis succeeds."""
+    calls = len(tool_calls_made)
+    if not calls:
+        return f"[agent completed {max_iter} iterations without tool evidence or a conclusive answer]"
+    last_tools = ", ".join(
+        str(call.get("name") or "unknown")
+        for call in tool_calls_made[-3:]
+    )
+    return (
+        f"[agent completed {max_iter} iterations and {calls} tool calls without "
+        f"a conclusive answer; last tools: {last_tools}]"
+    )
+
+
 def _tool_names(tool_defs: list[dict]) -> list[str]:
     return [
         schema.get("function", {}).get("name", "")
@@ -633,10 +648,7 @@ async def _execute_loop(
                         synthesized.get("error"),
                     )
         if not final_answer:
-            final_answer = (
-                _last_assistant_content(messages)
-                or f"[agent completed {max_iter} iterations without a conclusive answer]"
-            )
+            final_answer = _inconclusive_answer(max_iter, tool_calls_made)
 
     return final_answer, stopped_reason, iterations_done, tool_calls_made, plan_state
 

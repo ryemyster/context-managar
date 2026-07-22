@@ -262,6 +262,32 @@ async def test_auto_mode_returns_artifact_reference_for_large_result():
 
 
 @pytest.mark.asyncio
+async def test_investigate_reference_summary_marks_inconclusive_run():
+    payload = {
+        "status": "max_iterations",
+        "stopped_reason": "max_iterations",
+        "final_answer": "[agent completed 8 iterations and 4 tool calls without a conclusive answer]",
+        "tool_calls_made": [{"name": "read_file"} for _ in range(4)],
+        "artifacts": {"event_id": "agents-run-1", "markdown": "/tmp/agent.md"},
+    }
+    with patch.object(
+        mcp.artifact_store,
+        "write_record",
+        return_value={
+            "event_id": "mcp-investigate-1",
+            "record": "/tmp/records/mcp-investigate-1.json",
+            "markdown": None,
+            "event_log": "/tmp/events.jsonl",
+        },
+    ):
+        result = mcp._reference_response("investigate_codebase", {"task": "Inspect"}, payload)
+
+    assert result["artifact_id"] == "agents-run-1"
+    assert result["artifact_path"] == "/tmp/agent.md"
+    assert result["summary"].startswith("Agent run inconclusive (max_iterations); 4 tool calls.")
+
+
+@pytest.mark.asyncio
 async def test_inline_mode_preserves_full_large_result():
     payload = {"summary": "x" * 2000, "written_to": "/tmp/context-bundle.md"}
     with (
