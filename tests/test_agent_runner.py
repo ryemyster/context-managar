@@ -67,7 +67,8 @@ def test_build_system_prompt_mentions_only_enabled_tools():
 
     prompt = _build_system_prompt(tool_defs)
 
-    assert "update_plan -> read_file" in prompt
+    assert "read_file" in prompt
+    assert "low iteration budget" in prompt
     assert "call read_file directly" in prompt
     assert "search_memory" not in prompt
     assert "scan_directory" not in prompt
@@ -419,6 +420,36 @@ async def test_run_agent_synthesizes_answer_at_max_iterations_when_evidence_exis
     assert result.stopped_reason == "final_answer"
     assert result.final_answer == "The first heading is # context-engine."
     mock_answer.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_agent_synthesizes_before_final_iteration_tool_selection():
+    """The final iteration should be reserved for synthesis once evidence exists."""
+    tool_call_msg = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"function": {"name": "read_file", "arguments": {"file": "owner/repo/app.py"}}}],
+    }
+
+    with patch("app.agent_runner.inference.select_tool_call", new_callable=AsyncMock) as mock_select, \
+         patch("app.agent_runner.tool_registry.get_tool_definitions",
+               return_value=[{"type": "function", "function": {"name": "read_file"}}]), \
+         patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock,
+               return_value=ToolResult(ok=True, data="# context-engine")), \
+         patch("app.agent_runner.inference.answer_from_evidence", new_callable=AsyncMock,
+               return_value={"final_answer": "The first heading is # context-engine."}) as mock_answer, \
+         patch("app.agent_runner._verify_answer", new_callable=AsyncMock,
+               return_value={"passed": True}), \
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""):
+        mock_select.return_value = tool_call_msg["tool_calls"][0]
+
+        result = await run_agent("Read heading", max_iterations=2)
+
+    assert result.stopped_reason == "final_answer"
+    assert result.final_answer == "The first heading is # context-engine."
+    assert len(result.tool_calls_made) == 1
+    mock_answer.assert_awaited_once()
+    mock_select.assert_awaited_once()
 
 
 @pytest.mark.asyncio

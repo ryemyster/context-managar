@@ -26,7 +26,10 @@ _BASE_SYSTEM_PROMPT = (
     "called a tool unless the runtime returned its result. Invoke tools through "
     "the native tool-call interface; do not describe a future call or print a "
     "JSON/XML imitation of one. You may provide a final answer only after at "
-    "least one enabled tool has returned evidence. "
+    "least one enabled tool has returned evidence. Prefer targeted file reads "
+    "and specific code searches over broad directory scanning once you have "
+    "candidate paths. If the iteration budget is low, gather the most relevant "
+    "evidence first and then synthesize the best supported answer. "
     f"Repository root: {config.REPO_ROOT}"
 )
 
@@ -145,8 +148,6 @@ def _build_system_prompt(tool_defs: list[dict], custom_prompt: str | None = None
 
     order = [
         name for name in (
-            "search_memory",
-            "update_plan",
             "scan_directory",
             "find_in_code",
             "grep",
@@ -167,9 +168,42 @@ def _build_system_prompt(tool_defs: list[dict], custom_prompt: str | None = None
         )
     if "update_plan" in names:
         parts.append(
-            "Record a concise plan with update_plan before repository exploration."
+            "Use update_plan only when planning will materially improve a multi-step "
+            "investigation; do not spend a low iteration budget on planning instead "
+            "of evidence gathering."
+        )
+    if "search_memory" in names:
+        parts.append(
+            "Prior memory may already be injected before the task. Call search_memory "
+            "only for a specific missing lead; do not repeat broad memory searches."
         )
     return " ".join(parts)
+
+
+async def _answer_from_current_evidence(
+    messages: list[dict],
+    model: str | None,
+    timeout: float,
+) -> str:
+    """Ask the model to synthesize a final answer from gathered tool evidence."""
+    if timeout <= 0:
+        return ""
+    synthesized = await inference.answer_from_evidence(
+        messages,
+        model=model,
+        timeout=timeout,
+    )
+    if synthesized.get("final_answer"):
+        synthesized_answer = str(synthesized["final_answer"]).strip()
+        if not _looks_like_tool_intent_answer(synthesized_answer):
+            return synthesized_answer
+        log.warning("agent_runner rejected tool-intent evidence synthesis")
+    else:
+        log.debug(
+            "agent_runner evidence synthesis failed error=%s",
+            synthesized.get("error"),
+        )
+    return ""
 
 
 def _recover_text_tool_calls(content: str, allowed_names: set[str]) -> list[dict]:
@@ -366,6 +400,22 @@ async def _execute_loop(
         call_timeout = min(config.OLLAMA_AGENT_CALL_TIMEOUT, remaining)
 
         has_tool_evidence = any(msg.get("role") == "tool" for msg in messages)
+        if tool_defs and has_tool_evidence and i == max_iter - 1:
+            fallback_timeout = min(config.OLLAMA_AGENT_SELECT_TIMEOUT, remaining)
+            synthesized_answer = await _answer_from_current_evidence(
+                messages,
+                model=model,
+                timeout=fallback_timeout,
+            )
+            if synthesized_answer:
+                final_answer = synthesized_answer
+                stopped_reason = "final_answer"
+                log.info(
+                    "agent_runner synthesized answer before final tool selection iter=%d",
+                    i + 1,
+                )
+                break
+
         if tool_defs:
             selection_timeout = min(config.OLLAMA_AGENT_SELECT_TIMEOUT, remaining)
             selected = await inference.select_tool_call(
@@ -414,45 +464,22 @@ async def _execute_loop(
                     for call in tool_calls_made
                 )
                 if duplicate:
-                    synthesized = await inference.answer_from_evidence(
+                    synthesized_answer = await _answer_from_current_evidence(
                         messages,
                         model=model,
                         timeout=selection_timeout,
                     )
-                    if synthesized.get("final_answer"):
-                        synthesized_answer = str(synthesized["final_answer"]).strip()
-                        if _looks_like_tool_intent_answer(synthesized_answer):
-                            log.warning(
-                                "agent_runner rejected tool-intent synthesized answer iter=%d",
-                                i + 1,
-                            )
-                            messages.append({
-                                "role": "assistant",
-                                "content": synthesized_answer,
-                                "tool_calls": [],
-                            })
-                            messages.append({
-                                "role": "user",
-                                "content": (
-                                    "That was not a final answer, and the selected "
-                                    "tool call already succeeded with the same "
-                                    "arguments. Do not repeat it. Answer from the "
-                                    "returned evidence, or call a different enabled "
-                                    "tool with different arguments."
-                                ),
-                            })
-                            continue
-                        else:
-                            message = {
-                                "role": "assistant",
-                                "content": synthesized_answer,
-                                "tool_calls": [],
-                            }
-                            log.info(
-                                "agent_runner synthesized answer after duplicate tool iter=%d tool=%s",
-                                i + 1,
-                                selected_name,
-                            )
+                    if synthesized_answer:
+                        message = {
+                            "role": "assistant",
+                            "content": synthesized_answer,
+                            "tool_calls": [],
+                        }
+                        log.info(
+                            "agent_runner synthesized answer after duplicate tool iter=%d tool=%s",
+                            i + 1,
+                            selected_name,
+                        )
                     else:
                         messages.append({
                             "role": "assistant",
@@ -623,30 +650,18 @@ async def _execute_loop(
                 config.OLLAMA_AGENT_SELECT_TIMEOUT,
                 max(0.0, budget - (time.monotonic() - t_start)),
             )
-            if fallback_timeout > 0:
-                synthesized = await inference.answer_from_evidence(
-                    messages,
-                    model=model,
-                    timeout=fallback_timeout,
+            synthesized_answer = await _answer_from_current_evidence(
+                messages,
+                model=model,
+                timeout=fallback_timeout,
+            )
+            if synthesized_answer:
+                final_answer = synthesized_answer
+                stopped_reason = "final_answer"
+                log.info(
+                    "agent_runner synthesized answer at max_iterations iter=%d",
+                    max_iter,
                 )
-                if synthesized.get("final_answer"):
-                    synthesized_answer = str(synthesized["final_answer"]).strip()
-                    if _looks_like_tool_intent_answer(synthesized_answer):
-                        log.warning(
-                            "agent_runner rejected tool-intent max_iterations synthesis"
-                        )
-                    else:
-                        final_answer = synthesized_answer
-                        stopped_reason = "final_answer"
-                        log.info(
-                            "agent_runner synthesized answer at max_iterations iter=%d",
-                            max_iter,
-                        )
-                else:
-                    log.debug(
-                        "agent_runner synthesize at max_iterations failed error=%s",
-                        synthesized.get("error"),
-                    )
         if not final_answer:
             final_answer = _inconclusive_answer(max_iter, tool_calls_made)
 
