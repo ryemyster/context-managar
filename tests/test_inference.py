@@ -76,7 +76,7 @@ async def test_service_reasoning_uses_reasoning_role():
 
 
 @pytest.mark.asyncio
-async def test_service_preserves_agent_selector_and_fast_fallback_routes():
+async def test_service_uses_selection_model_for_selector_and_fallback_routes():
     service = InferenceService(settings())
     service.chat = AsyncMock(
         return_value={
@@ -90,10 +90,89 @@ async def test_service_preserves_agent_selector_and_fast_fallback_routes():
 
     result = await service.select_tool_call([], tools)
     assert result == {"final_answer": "done"}
-    assert service.chat.await_args.kwargs["model"] == "agent-model"
+    assert service.chat.await_args.kwargs["model"] == "select-model"
 
     await service.chat_with_tools([], tools)
     assert service.chat.await_args.kwargs["model"] == "select-model"
+
+
+@pytest.mark.asyncio
+async def test_service_selector_accepts_native_tool_call_response():
+    service = InferenceService(settings())
+    service.chat = AsyncMock(
+        return_value={
+            "content": "",
+            "tool_calls": [{
+                "function": {
+                    "name": "repo_browser.read_file",
+                    "arguments": {"file": "owner/repo/app.py"},
+                },
+            }],
+        }
+    )
+    tools = [{"type": "function", "function": {"name": "read_file"}}]
+
+    result = await service.select_tool_call([], tools)
+
+    assert result == {
+        "function": {
+            "name": "read_file",
+            "arguments": {"file": "owner/repo/app.py"},
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_service_selector_accepts_nested_tool_call_json():
+    service = InferenceService(settings())
+    service.chat = AsyncMock(
+        return_value={
+            "content": (
+                '{"tool_call":{"name":"read_file",'
+                '"arguments":{"file":"owner/repo/app.py"}}}'
+            )
+        }
+    )
+    tools = [{"type": "function", "function": {"name": "read_file"}}]
+
+    result = await service.select_tool_call([], tools)
+
+    assert result == {
+        "function": {
+            "name": "read_file",
+            "arguments": {"file": "owner/repo/app.py"},
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_service_verifier_accepts_supported_alias():
+    service = InferenceService(settings())
+    service.chat = AsyncMock(return_value={"content": '{"supported": true}'})
+
+    result = await service.verify_agent_answer("prompt")
+
+    assert result["passed"] is True
+    assert result["unsupported_claims"] == []
+    assert result["evidence_gap"] is False
+
+
+@pytest.mark.asyncio
+async def test_service_answer_from_evidence_uses_fast_model_and_preserves_task():
+    service = InferenceService(settings())
+    service.chat = AsyncMock(return_value={"content": "The first heading is # context-engine."})
+
+    result = await service.answer_from_evidence([
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "Tell me the first heading only."},
+        {"role": "tool", "content": "# context-engine\n\nbody"},
+    ])
+
+    assert result == {"final_answer": "The first heading is # context-engine."}
+    assert service.chat.await_args.kwargs["model"] == "fast-model"
+    prompt = service.chat.await_args.args[0][1]["content"]
+    assert "Tell me the first heading only." in prompt
+    assert "Answer exactly the task" in prompt
 
 
 @pytest.mark.asyncio

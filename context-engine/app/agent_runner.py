@@ -84,6 +84,36 @@ def _serialize_tool_result(result: tool_registry.ToolResult) -> str:
     return " ".join(parts)
 
 
+def _looks_like_tool_intent_answer(content: str) -> bool:
+    """Detect non-final prose where a model describes the next tool action."""
+    text = " ".join(content.lower().split())
+    if not text:
+        return False
+    intent_phrases = (
+        "need to read",
+        "need to inspect",
+        "need to search",
+        "need to scan",
+        "need more evidence",
+        "need to call",
+        "should read",
+        "should inspect",
+        "should search",
+        "should call",
+        "let's read",
+        "let us read",
+        "i will read",
+        "i'll read",
+        "call read_file",
+        "use read_file",
+        "call grep",
+        "use grep",
+        "call scan_directory",
+        "use scan_directory",
+    )
+    return any(phrase in text for phrase in intent_phrases)
+
+
 def _tool_names(tool_defs: list[dict]) -> list[str]:
     return [
         schema.get("function", {}).get("name", "")
@@ -329,9 +359,30 @@ async def _execute_loop(
                 timeout=selection_timeout,
             )
             if selected.get("final_answer"):
+                selected_answer = str(selected["final_answer"]).strip()
+                if _looks_like_tool_intent_answer(selected_answer):
+                    log.warning(
+                        "agent_runner rejected tool-intent final answer iter=%d",
+                        i + 1,
+                    )
+                    messages.append({
+                        "role": "assistant",
+                        "content": selected_answer,
+                        "tool_calls": [],
+                    })
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "That was not a final answer. If more repository "
+                            "evidence is needed, call an enabled tool through "
+                            "the native tool-call interface. Otherwise answer "
+                            "directly from the returned tool evidence."
+                        ),
+                    })
+                    continue
                 message = {
                     "role": "assistant",
-                    "content": selected["final_answer"],
+                    "content": selected_answer,
                     "tool_calls": [],
                 }
                 log.info("agent_runner structured final answer iter=%d", i + 1)
@@ -354,22 +405,60 @@ async def _execute_loop(
                         timeout=selection_timeout,
                     )
                     if synthesized.get("final_answer"):
-                        message = {
+                        synthesized_answer = str(synthesized["final_answer"]).strip()
+                        if _looks_like_tool_intent_answer(synthesized_answer):
+                            log.warning(
+                                "agent_runner rejected tool-intent synthesized answer iter=%d",
+                                i + 1,
+                            )
+                            messages.append({
+                                "role": "assistant",
+                                "content": synthesized_answer,
+                                "tool_calls": [],
+                            })
+                            messages.append({
+                                "role": "user",
+                                "content": (
+                                    "That was not a final answer, and the selected "
+                                    "tool call already succeeded with the same "
+                                    "arguments. Do not repeat it. Answer from the "
+                                    "returned evidence, or call a different enabled "
+                                    "tool with different arguments."
+                                ),
+                            })
+                            continue
+                        else:
+                            message = {
+                                "role": "assistant",
+                                "content": synthesized_answer,
+                                "tool_calls": [],
+                            }
+                            log.info(
+                                "agent_runner synthesized answer after duplicate tool iter=%d tool=%s",
+                                i + 1,
+                                selected_name,
+                            )
+                    else:
+                        messages.append({
                             "role": "assistant",
-                            "content": synthesized["final_answer"],
+                            "content": "",
                             "tool_calls": [],
-                        }
-                        log.info(
-                            "agent_runner synthesized answer after duplicate tool iter=%d tool=%s",
+                        })
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "The selected tool call already succeeded with "
+                                "the same arguments. Do not repeat it. Answer "
+                                "from the returned evidence, or call a different "
+                                "enabled tool with different arguments."
+                            ),
+                        })
+                        log.warning(
+                            "agent_runner skipped duplicate successful tool iter=%d tool=%s",
                             i + 1,
                             selected_name,
                         )
-                    else:
-                        message = {
-                            "role": "assistant",
-                            "content": "",
-                            "tool_calls": [selected],
-                        }
+                        continue
                 else:
                     message = {
                         "role": "assistant",
@@ -470,7 +559,22 @@ async def _execute_loop(
                     ),
                 })
                 continue
-            final_answer = (message.get("content") or "").strip()
+            candidate_answer = (message.get("content") or "").strip()
+            if _looks_like_tool_intent_answer(candidate_answer):
+                log.warning(
+                    "agent_runner rejected tool-intent assistant content iter=%d",
+                    i + 1,
+                )
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "That was not a final answer. Call an enabled tool if "
+                        "more evidence is needed; otherwise answer using the "
+                        "tool evidence already returned."
+                    ),
+                })
+                continue
+            final_answer = candidate_answer
             stopped_reason = "final_answer"
             log.info("agent_runner final_answer iter=%d dur=%.1fs", i + 1, time.monotonic() - t_start)
             break
@@ -499,10 +603,40 @@ async def _execute_loop(
             })
             messages.append({"role": "tool", "content": serialized})
     else:
-        final_answer = (
-            _last_assistant_content(messages)
-            or f"[agent completed {max_iter} iterations without a conclusive answer]"
-        )
+        if any(msg.get("role") == "tool" for msg in messages):
+            fallback_timeout = min(
+                config.OLLAMA_AGENT_SELECT_TIMEOUT,
+                max(0.0, budget - (time.monotonic() - t_start)),
+            )
+            if fallback_timeout > 0:
+                synthesized = await inference.answer_from_evidence(
+                    messages,
+                    model=model,
+                    timeout=fallback_timeout,
+                )
+                if synthesized.get("final_answer"):
+                    synthesized_answer = str(synthesized["final_answer"]).strip()
+                    if _looks_like_tool_intent_answer(synthesized_answer):
+                        log.warning(
+                            "agent_runner rejected tool-intent max_iterations synthesis"
+                        )
+                    else:
+                        final_answer = synthesized_answer
+                        stopped_reason = "final_answer"
+                        log.info(
+                            "agent_runner synthesized answer at max_iterations iter=%d",
+                            max_iter,
+                        )
+                else:
+                    log.debug(
+                        "agent_runner synthesize at max_iterations failed error=%s",
+                        synthesized.get("error"),
+                    )
+        if not final_answer:
+            final_answer = (
+                _last_assistant_content(messages)
+                or f"[agent completed {max_iter} iterations without a conclusive answer]"
+            )
 
     return final_answer, stopped_reason, iterations_done, tool_calls_made, plan_state
 

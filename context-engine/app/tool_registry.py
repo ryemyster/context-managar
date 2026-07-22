@@ -360,6 +360,17 @@ async def _exec_read_file(arguments: dict) -> ToolResult:
                           error_type="not_found")
     lines = content.splitlines()
     start = max(0, offset - 1)
+    if start >= len(lines):
+        return ToolResult(
+            ok=False,
+            data=f"offset {offset} is beyond EOF for '{file}' ({len(lines)} lines)",
+            error_type="invalid_input",
+            retryable=True,
+            recovery_hint=(
+                f"Use read_file with offset between 1 and {max(len(lines), 1)}, "
+                "or answer from the lines already returned."
+            ),
+        )
     end = (start + int(limit)) if limit else len(lines)
     sliced = "\n".join(lines[start:end])
     return ToolResult(ok=True, data=_truncate(sliced))

@@ -19,6 +19,7 @@ from app.agent_runner import (
     _build_repair_prompt,
     _build_system_prompt,
     _coerce_arguments,
+    _looks_like_tool_intent_answer,
     _normalize_tool_arguments,
     _recover_text_tool_calls,
     _verify_answer,
@@ -101,6 +102,12 @@ def test_normalize_tool_arguments_leaves_external_path_for_rejection():
     normalized = _normalize_tool_arguments({"file": "/etc/passwd"})
 
     assert normalized == {"file": "/etc/passwd"}
+
+
+def test_tool_intent_answer_detection():
+    assert _looks_like_tool_intent_answer("We need to read rest of file.")
+    assert _looks_like_tool_intent_answer("Let's read beyond truncation.")
+    assert not _looks_like_tool_intent_answer("AGENT_MAX_ITERATIONS is defined in app/config.py.")
 
 
 # ── run_agent — stop conditions ────────────────────────────────────────────────
@@ -363,7 +370,7 @@ async def test_run_agent_stops_on_model_error():
 
 @pytest.mark.asyncio
 async def test_run_agent_stops_at_max_iterations():
-    """When model always calls tools, loop stops at max_iterations."""
+    """When model always calls tools, loop stops if evidence synthesis fails."""
     tool_call_msg = {
         "role": "assistant",
         "content": "Still thinking...",
@@ -372,7 +379,9 @@ async def test_run_agent_stops_at_max_iterations():
 
     with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
-         patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec:
+         patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
+         patch("app.agent_runner.inference.answer_from_evidence", new_callable=AsyncMock,
+               return_value={"error": "empty final answer"}):
         mock_chat.return_value = tool_call_msg
         mock_exec.return_value = ToolResult(ok=True, data="health: ok")
 
@@ -380,6 +389,56 @@ async def test_run_agent_stops_at_max_iterations():
 
     assert result.stopped_reason == "max_iterations"
     assert result.iterations == 3
+
+
+@pytest.mark.asyncio
+async def test_run_agent_synthesizes_answer_at_max_iterations_when_evidence_exists():
+    """Useful evidence should still produce a final answer at the iteration ceiling."""
+    tool_call_msg = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"function": {"name": "read_file", "arguments": {"file": "owner/repo/app.py"}}}],
+    }
+
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
+         patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock,
+               return_value=ToolResult(ok=True, data="# context-engine")), \
+         patch("app.agent_runner.inference.answer_from_evidence", new_callable=AsyncMock,
+               return_value={"final_answer": "The first heading is # context-engine."}) as mock_answer, \
+         patch("app.agent_runner._verify_answer", new_callable=AsyncMock,
+               return_value={"passed": True}):
+        mock_chat.return_value = tool_call_msg
+
+        result = await run_agent("Read heading", max_iterations=1)
+
+    assert result.stopped_reason == "final_answer"
+    assert result.final_answer == "The first heading is # context-engine."
+    mock_answer.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_agent_rejects_tool_intent_structured_final_answer():
+    """A model saying it needs a tool is not treated as a final answer."""
+    tools = [{"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}]
+    selections = [
+        {"final_answer": "We need to read rest of file."},
+        {"function": {"name": "read_file", "arguments": {"file": "owner/repo/README.md"}}},
+        {"final_answer": "The README starts with # context-engine."},
+    ]
+
+    with patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=tools), \
+         patch("app.agent_runner.inference.select_tool_call", new_callable=AsyncMock,
+               side_effect=selections) as mock_select, \
+         patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock,
+               return_value=ToolResult(ok=True, data="# context-engine")), \
+         patch("app.agent_runner._verify_answer", new_callable=AsyncMock,
+               return_value={"passed": True}):
+        result = await run_agent("Read README", tools=["read_file"], max_iterations=3)
+
+    assert result.stopped_reason == "final_answer"
+    assert result.final_answer == "The README starts with # context-engine."
+    assert mock_select.await_count == 3
 
 
 @pytest.mark.asyncio

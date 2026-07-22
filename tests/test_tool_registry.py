@@ -281,6 +281,25 @@ async def test_read_file_offset_and_limit():
     assert len(lines) == 3
 
 
+@pytest.mark.asyncio
+async def test_read_file_offset_beyond_eof_returns_recovery_hint():
+    content = "\n".join(f"line{i}" for i in range(1, 4))
+    fake_path = MagicMock(spec=Path)
+    fake_path.exists.return_value = True
+    with patch("app.tool_registry.safe_resolve", return_value=fake_path), \
+         patch("app.tool_registry._read_file", return_value=content):
+        result = await execute_tool(
+            "read_file",
+            {"file": "owner/repo/app.py", "offset": 2000, "limit": 20},
+        )
+
+    assert result.ok is False
+    assert result.error_type == "invalid_input"
+    assert result.retryable is True
+    assert "beyond EOF" in result.data
+    assert result.recovery_hint and "offset between 1 and 3" in result.recovery_hint
+
+
 # ── grep executor ──────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

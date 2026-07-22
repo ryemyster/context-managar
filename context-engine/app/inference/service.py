@@ -293,9 +293,7 @@ class InferenceService:
                 },
                 {"role": "user", "content": prompt},
             ],
-            # Preserve the existing structured selector route. The lighter
-            # selection model remains the native tool-call fallback route.
-            model=model or self.settings.agent_model,
+            model=model or self.settings.selection_model,
             timeout=request_timeout,
             response_schema=schema,
             temperature=0,
@@ -311,18 +309,34 @@ class InferenceService:
                     )
                 }
             return {"error": error}
+        tool_calls = message.get("tool_calls") or []
+        if tool_calls:
+            call = tool_calls[0]
+            function = call.get("function") if isinstance(call, dict) else {}
+            raw_name = str(function.get("name") or "")
+            name = raw_name.rsplit(".", 1)[-1]
+            arguments = function.get("arguments") or {}
+            if name in names and isinstance(arguments, dict):
+                return {"function": {"name": name, "arguments": arguments}}
         parsed = parse_json_response(str(message.get("content") or ""))
-        if parsed.get("action") == "final_answer":
+        if parsed.get("action") == "final_answer" or (
+            parsed.get("final_answer") and parsed.get("action") is None
+        ):
             final_answer = str(parsed.get("final_answer") or "").strip()
             return (
                 {"final_answer": final_answer}
                 if final_answer
                 else {"error": "structured action returned an empty final answer"}
             )
-        name = parsed.get("name")
-        arguments = parsed.get("arguments")
+        nested_tool = parsed.get("tool_call") or parsed.get("tool") or {}
+        if isinstance(nested_tool, dict):
+            name = parsed.get("name") or nested_tool.get("name")
+            arguments = parsed.get("arguments") or nested_tool.get("arguments")
+        else:
+            name = parsed.get("name")
+            arguments = parsed.get("arguments")
         if (
-            parsed.get("action") != "call_tool"
+            parsed.get("action") not in {"call_tool", None}
             or name not in names
             or not isinstance(arguments, dict)
         ):
@@ -380,6 +394,16 @@ class InferenceService:
                 )
             }
         parsed = parse_json_response(str(message.get("content") or ""))
+        if "passed" not in parsed:
+            for key in ("supported", "is_supported"):
+                if key in parsed:
+                    parsed = {
+                        "passed": bool(parsed.get(key)),
+                        "rationale": str(parsed.get("rationale") or ""),
+                        "unsupported_claims": list(parsed.get("unsupported_claims") or []),
+                        "evidence_gap": bool(parsed.get("evidence_gap") is True),
+                    }
+                    break
         return parsed if "passed" in parsed else {"error": "parse_failed"}
 
     async def answer_from_evidence(
@@ -388,6 +412,14 @@ class InferenceService:
         model: str | None = None,
         timeout: float | None = None,
     ) -> dict:
+        original_task = next(
+            (
+                str(message.get("content") or "").strip()
+                for message in messages
+                if message.get("role") == "user" and message.get("content")
+            ),
+            "",
+        )
         conversation = [
             {
                 "role": message.get("role", ""),
@@ -395,12 +427,6 @@ class InferenceService:
             }
             for message in messages[-8:]
         ]
-        schema = {
-            "type": "object",
-            "properties": {"final_answer": {"type": "string"}},
-            "required": ["final_answer"],
-            "additionalProperties": False,
-        }
         message = await self.chat(
             [
                 {
@@ -408,24 +434,35 @@ class InferenceService:
                     "content": (
                         "Answer the repository task using only the accumulated "
                         "tool evidence. Be concise and cite repository-relative paths. "
-                        "Return only the required JSON."
+                        "Do not call tools."
                     ),
                 },
                 {
                     "role": "user",
-                    "content": json.dumps(conversation, separators=(",", ":")),
+                    "content": (
+                        f"Task:\n{original_task}\n\n"
+                        "Recent conversation and tool evidence:\n"
+                        f"{json.dumps(conversation, separators=(',', ':'))}\n\n"
+                        "Answer exactly the task. Do not broaden the answer."
+                    ),
                 },
             ],
-            model=model or self.settings.agent_model,
+            model=model or self.settings.fast_model,
             timeout=timeout or app_config.OLLAMA_AGENT_SELECT_TIMEOUT,
-            response_schema=schema,
             temperature=0,
         )
         if message.get("error"):
             return {"error": message["error"]}
-        parsed = parse_json_response(str(message.get("content") or ""))
+        if message.get("tool_calls"):
+            return {"error": "synthesis returned a tool call"}
+        content = str(message.get("content") or "").strip()
+        parsed = parse_json_response(content)
         answer = str(parsed.get("final_answer") or "").strip()
-        return {"final_answer": answer} if answer else {"error": "empty final answer"}
+        if answer:
+            return {"final_answer": answer}
+        if content:
+            return {"final_answer": content}
+        return {"error": "empty final answer"}
 
     async def list_models(self) -> list[str]:
         return await self.generation_provider.list_models()
