@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, patch
 
 from app import artifact_store, config
 from app import supabase_vector
+from app.main import store_context_note
+from app.models import StoreContextNoteRequest
 
 
 class ArtifactStoreTests(unittest.TestCase):
@@ -74,6 +76,41 @@ class ArtifactStoreTests(unittest.TestCase):
                 self.assertTrue(upserts)
                 self.assertEqual(upserts[0][0], "context_record://context/context-123")
                 self.assertIn('"source_type": "context_record"', upserts[0][1])
+
+        import asyncio
+
+        asyncio.run(run_test())
+
+    def test_store_context_note_returns_markdown_artifact_and_retrieval_hints(self):
+        async def run_test():
+            with tempfile.TemporaryDirectory() as tmp:
+                original_output = config.OUTPUT_DIR
+                config.OUTPUT_DIR = Path(tmp)
+                try:
+                    req = StoreContextNoteRequest(
+                        title="ShaleYeah GitHub Project Plan Snapshot",
+                        content="Milestone 06 plan and architecture notes.",
+                        source="github",
+                        tags=["plan", "architecture", "milestone-06"],
+                        repo="ryemyster/ShaleYeah",
+                        scope="repo",
+                    )
+                    with patch(
+                        "app.routes.repo.supabase_vector.store_artifact_record",
+                        AsyncMock(return_value=[]),
+                    ) as store_record:
+                        result = await store_context_note(req)
+
+                    self.assertTrue(result["artifact_id"].startswith("context_note-"))
+                    self.assertTrue(result["artifact_path"].endswith(".md"))
+                    self.assertEqual(result["retrieval_hints"]["filters"]["repo"], "ryemyster/ShaleYeah")
+                    self.assertIn("milestone-06", result["retrieval_hints"]["vector_query"])
+                    markdown_path = Path(result["artifact_path"])
+                    self.assertTrue(markdown_path.exists())
+                    self.assertIn("## Content", markdown_path.read_text(encoding="utf-8"))
+                    store_record.assert_awaited_once()
+                finally:
+                    config.OUTPUT_DIR = original_output
 
         import asyncio
 

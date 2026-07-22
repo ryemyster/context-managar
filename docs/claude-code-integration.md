@@ -66,6 +66,7 @@ Verify cited source files before implementing or making issue decisions.
 | `load_context` | Bounded context bundle before implementation |
 | `review_diff` | Risks and test recommendations after editing |
 | `audit_issue` | Evidence-based issue audit |
+| `store_context_note` | Durable curated plans, decisions, and triage notes |
 
 Advanced tools are `scan_directory`, `find_in_code`, `summarize_file`,
 `dependency_analysis`, `route_analysis`, `draft_file`, `scaffold_files`, and
@@ -92,8 +93,9 @@ orchestrate advanced retrieval tools when delegation fits.
 Use `load_context` for bounded pre-task context and `review_diff` after edits.
 For advanced direct discovery, use `mode=context_safe` first; if results are
 thin, make one re-call without the mode flag before broadening reads.
-Context Engine is read-only. Verify its evidence and own all file writes and
-decisions. If the service is unavailable, continue without it.
+Context Engine never writes to the repository. It may persist explicit curated
+notes through `store_context_note`. Verify its evidence and own all file writes
+and decisions. If the service is unavailable, continue without it.
 ```
 
 ## Authentication And Remote REST
@@ -102,6 +104,8 @@ The persistent MCP launchd service reads:
 
 ```text
 CONTEXT_ENGINE_URL=http://localhost:8088
+CONTEXT_ENGINE_PUBLIC_BASE_URL=https://context.example.com
+CONTEXT_ENGINE_PUBLIC_MCP_URL=https://context.example.com/mcp
 CONTEXT_ENGINE_API_KEY=<optional secret>
 CONTEXT_ENGINE_MCP_HOST=127.0.0.1
 CONTEXT_ENGINE_MCP_PORT=8089
@@ -109,6 +113,11 @@ CONTEXT_ENGINE_MCP_PORT=8089
 
 Set these before running `scripts/install-mcp.sh` when overriding defaults. The
 REST API key is forwarded as `X-API-Key`.
+
+`GET /setup` prefers `CONTEXT_ENGINE_PUBLIC_BASE_URL` and
+`CONTEXT_ENGINE_PUBLIC_MCP_URL` when present. Set them for remote or cloud
+deployments so generated agent bootstrap commands reference the public endpoint
+rather than the local launchd defaults.
 
 The adapter implements this forwarding, but `scripts/install-mcp.sh` currently
 does not persist `CONTEXT_ENGINE_API_KEY` in the generated launchd plist. An

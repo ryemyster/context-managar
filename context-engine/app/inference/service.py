@@ -8,6 +8,7 @@ import httpx
 
 from .. import config as app_config
 from ..logger import log
+from ..metrics import metrics
 from .config import InferenceConfig, load_inference_config
 from .factory import create_provider
 from .models import ChatRequest, EmbeddingRequest, GenerationRequest
@@ -58,25 +59,49 @@ class InferenceService:
         started = time.monotonic()
         try:
             result = await self.generation_provider.generate(request)
+            duration_ms = (time.monotonic() - started) * 1000
+            metrics.record_inference(
+                operation=role,
+                provider=self.generation_provider.name,
+                model=request.model,
+                duration_ms=duration_ms,
+                outcome="success",
+            )
             log.debug(
                 "inference %s done provider=%s dur=%.2fs response_len=%d",
                 role,
                 self.generation_provider.name,
-                time.monotonic() - started,
+                duration_ms / 1000,
                 len(result),
             )
             return result
         except httpx.TimeoutException:
+            duration_ms = (time.monotonic() - started) * 1000
+            metrics.record_inference(
+                operation=role,
+                provider=self.generation_provider.name,
+                model=request.model,
+                duration_ms=duration_ms,
+                outcome="timeout",
+            )
             log.warning(
                 "inference %s timeout provider=%s model=%s dur=%.2fs",
                 role,
                 self.generation_provider.name,
                 request.model,
-                time.monotonic() - started,
+                duration_ms / 1000,
             )
             qualifier = "reasoning " if role == "reasoning" else ""
             return f"[timeout — {qualifier}prompt may be too long, try a smaller path]"
         except Exception as exc:
+            duration_ms = (time.monotonic() - started) * 1000
+            metrics.record_inference(
+                operation=role,
+                provider=self.generation_provider.name,
+                model=request.model,
+                duration_ms=duration_ms,
+                outcome="error",
+            )
             log.error("inference %s error: %s", role, exc)
             return f"[model error: {exc}]"
 
@@ -90,18 +115,50 @@ class InferenceService:
                     timeout=90.0,
                 )
             )
+            duration_ms = (time.monotonic() - started) * 1000
+            metrics.record_inference(
+                operation="embed",
+                provider=self.embedding_provider.name,
+                model=self.settings.embedding_model,
+                duration_ms=duration_ms,
+                outcome="success",
+            )
             log.debug(
                 "inference embed done provider=%s dur=%.2fs dims=%d",
                 self.embedding_provider.name,
-                time.monotonic() - started,
+                duration_ms / 1000,
                 len(result) if result else 0,
             )
             return result
+        except httpx.TimeoutException as exc:
+            duration_ms = (time.monotonic() - started) * 1000
+            metrics.record_inference(
+                operation="embed",
+                provider=self.embedding_provider.name,
+                model=self.settings.embedding_model,
+                duration_ms=duration_ms,
+                outcome="timeout",
+            )
+            log.warning(
+                "inference embed timeout provider=%s dur=%.2fs: %s",
+                self.embedding_provider.name,
+                duration_ms / 1000,
+                exc,
+            )
+            return None
         except Exception as exc:
+            duration_ms = (time.monotonic() - started) * 1000
+            metrics.record_inference(
+                operation="embed",
+                provider=self.embedding_provider.name,
+                model=self.settings.embedding_model,
+                duration_ms=duration_ms,
+                outcome="error",
+            )
             log.warning(
                 "inference embed failed provider=%s dur=%.2fs: %s",
                 self.embedding_provider.name,
-                time.monotonic() - started,
+                duration_ms / 1000,
                 exc,
             )
             return None
@@ -117,8 +174,9 @@ class InferenceService:
         max_tokens: int | None = None,
     ) -> dict:
         request_timeout = timeout or app_config.OLLAMA_AGENT_CALL_TIMEOUT
+        started = time.monotonic()
         try:
-            return await self.generation_provider.chat(
+            response = await self.generation_provider.chat(
                 ChatRequest(
                     messages=messages,
                     tools=tools or [],
@@ -130,9 +188,31 @@ class InferenceService:
                     context_window=app_config.OLLAMA_NUM_CTX,
                 )
             )
+            metrics.record_inference(
+                operation="chat",
+                provider=self.generation_provider.name,
+                model=model or self.settings.agent_model,
+                duration_ms=(time.monotonic() - started) * 1000,
+                outcome="success",
+            )
+            return response
         except httpx.TimeoutException:
+            metrics.record_inference(
+                operation="chat",
+                provider=self.generation_provider.name,
+                model=model or self.settings.agent_model,
+                duration_ms=(time.monotonic() - started) * 1000,
+                outcome="timeout",
+            )
             return {"error": f"timeout after {request_timeout:.0f}s — model took too long"}
         except Exception as exc:
+            metrics.record_inference(
+                operation="chat",
+                provider=self.generation_provider.name,
+                model=model or self.settings.agent_model,
+                duration_ms=(time.monotonic() - started) * 1000,
+                outcome="error",
+            )
             log.error("inference chat error: %s", exc)
             return {"error": str(exc)}
 

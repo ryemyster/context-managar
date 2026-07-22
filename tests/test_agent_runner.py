@@ -287,6 +287,28 @@ async def test_run_agent_preflight_skipped_when_search_memory_not_in_tools():
 
 
 @pytest.mark.asyncio
+async def test_run_agent_filters_tools_denied_by_allowed_scopes():
+    """Denied scoped tools should not be advertised to the model."""
+    final_msg = {"role": "assistant", "content": "Done.", "tool_calls": []}
+
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]) as mock_defs, \
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value="some memory") as mock_preflight:
+        mock_chat.return_value = final_msg
+        result = await run_agent("Scan code", max_iterations=1, allowed_scopes=["repo:read"])
+
+    mock_defs.assert_called_once_with([
+        "scan_directory",
+        "find_in_code",
+        "read_file",
+        "grep",
+        "update_plan",
+    ])
+    mock_preflight.assert_not_called()
+    assert result.memory_context_used is False
+
+
+@pytest.mark.asyncio
 async def test_run_agent_memory_context_used_when_preflight_returns_content():
     """memory_context_used=True and memory_hits>0 when preflight finds results."""
     final_msg = {"role": "assistant", "content": "Done.", "tool_calls": []}

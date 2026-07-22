@@ -35,6 +35,10 @@ class ArtifactStoreProxy:
     def __getattr__(self, name): return getattr(main.artifact_store, name)
 artifact_store = ArtifactStoreProxy()
 
+class MetricsProxy:
+    def __getattr__(self, name): return getattr(main.metrics, name)
+metrics = MetricsProxy()
+
 class ToolRegistryProxy:
     def __getattr__(self, name): return getattr(main.tool_registry, name)
 tool_registry = ToolRegistryProxy()
@@ -244,6 +248,7 @@ async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
     """Background worker for POST /agents/run."""
     # Defensive guard only. Individual model turns are bounded inside the agent.
     _wall_limit = config.OLLAMA_AGENT_TIMEOUT + config.OLLAMA_AGENT_CALL_TIMEOUT
+    started = time.monotonic()
     try:
         result = await asyncio.wait_for(
             agent_runner.run_agent(
@@ -256,6 +261,11 @@ async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
             timeout=_wall_limit,
         )
     except asyncio.TimeoutError:
+        metrics.record_agent_run(
+            kind="agents/run",
+            duration_ms=(time.monotonic() - started) * 1000,
+            outcome="timeout",
+        )
         log.error("agent/run background wall-clock timeout run_id=%s limit=%.0fs", run_id, _wall_limit)
         artifact_store.write_record(
             event_id=run_id,
@@ -272,6 +282,11 @@ async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
         )
         return
     except Exception:
+        metrics.record_agent_run(
+            kind="agents/run",
+            duration_ms=(time.monotonic() - started) * 1000,
+            outcome="error",
+        )
         log.error("agent/run background error run_id=%s\n%s", run_id, traceback.format_exc())
         artifact_store.write_record(
             event_id=run_id,
@@ -335,9 +350,19 @@ async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
             )
 
         asyncio.create_task(supabase_vector.store_artifact(written))
+        metrics.record_agent_run(
+            kind="agents/run",
+            duration_ms=(time.monotonic() - started) * 1000,
+            outcome=response_payload["status"],
+        )
         log.debug("agent/run background done run_id=%s stopped=%s iter=%d tool_calls=%d",
                   run_id, result.stopped_reason, result.iterations, len(result.tool_calls_made))
     except Exception:
+        metrics.record_agent_run(
+            kind="agents/run",
+            duration_ms=(time.monotonic() - started) * 1000,
+            outcome="error",
+        )
         log.error("agent/run background error run_id=%s\n%s", run_id, traceback.format_exc())
         artifact_store.write_record(
             event_id=run_id,
@@ -427,6 +452,7 @@ async def _run_issue_audit_background(
     task: str,
 ) -> None:
     """Background worker for /agents/issue-auditor/run. Overwrites the pending record when done."""
+    started = time.monotonic()
     try:
         result = await build_context(
             task=task,
@@ -496,9 +522,19 @@ async def _run_issue_audit_background(
             )
 
         asyncio.create_task(supabase_vector.store_artifact(written))
+        metrics.record_agent_run(
+            kind="agents/issue-auditor",
+            duration_ms=(time.monotonic() - started) * 1000,
+            outcome=run_status,
+        )
         log.debug("issue-auditor background done run_id=%s findings=%d warnings=%d",
                   run_id, len(findings), len(warnings))
     except Exception:
+        metrics.record_agent_run(
+            kind="agents/issue-auditor",
+            duration_ms=(time.monotonic() - started) * 1000,
+            outcome="error",
+        )
         log.error("issue-auditor background error run_id=%s\n%s", run_id, traceback.format_exc())
         artifact_store.write_record(
             event_id=run_id,

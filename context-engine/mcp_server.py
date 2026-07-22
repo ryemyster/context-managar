@@ -49,6 +49,7 @@ DISCOVERY_LIMIT_SCHEMA = {
     "maximum": 100,
     "description": "Maximum discovery references returned by REST.",
 }
+CAPABILITY_SCOPES = {"repo:read", "memory:read", "engine:read"}
 
 CONTROL_PLANE_DESCRIPTION = (
     "Large outputs are written to artifacts. This MCP tool returns references "
@@ -74,6 +75,10 @@ def _schema(
     description: str,
     properties: dict[str, Any],
     required: list[str],
+    *,
+    read_only: bool = True,
+    destructive: bool = False,
+    idempotent: bool = False,
 ) -> dict[str, Any]:
     return {
         "name": name,
@@ -101,9 +106,9 @@ def _schema(
         },
         "annotations": {
             "title": name.replace("_", " ").title(),
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": False,
+            "readOnlyHint": read_only,
+            "destructiveHint": destructive,
+            "idempotentHint": idempotent,
             "openWorldHint": False,
         },
     }
@@ -352,6 +357,38 @@ TOOLS = [
         ["query"],
     ),
     _schema(
+        "store_context_note",
+        (
+            "CURATED MEMORY WRITE TOOL. Persist an explicit, reviewable note via "
+            "POST /store-context-note. Use for plans, architecture decisions, "
+            "issue triage notes, and session carry-forward that should become "
+            "durable memory. Do not use it for raw transcript dumping or "
+            "automatic conversation logging. Retrieval remains separate."
+        ),
+        {
+            "title": {"type": "string", "minLength": 1},
+            "content": {"type": "string", "minLength": 1},
+            "source": {"type": "string", "minLength": 1},
+            "tags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "default": [],
+            },
+            "repo": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Repository identifier, for example ryemyster/ShaleYeah.",
+            },
+            "scope": {
+                "type": "string",
+                "enum": ["repo", "project", "session", "global"],
+                "description": "Durability scope for retrieval and caller intent.",
+            },
+        },
+        ["title", "content", "source", "repo", "scope"],
+        read_only=False,
+    ),
+    _schema(
         "route_analysis",
         (
             "ADVANCED DIRECT TOOL. Call the existing POST /routes workflow for a "
@@ -578,6 +615,11 @@ def _summarize_payload(name: str, payload: dict[str, Any]) -> str:
         api = len(payload.get("api_routes") or [])
         middleware = len(payload.get("middleware") or [])
         return f"Route analysis found {routes} routes, {api} API routes, and {middleware} middleware files."
+    if name == "store_context_note":
+        return (
+            f"Stored context note '{payload.get('artifact_id', 'unknown')}' "
+            f"for {payload.get('retrieval_hints', {}).get('filters', {}).get('repo', 'unknown repo')}."
+        )
     if name == "draft_file":
         code_len = len(payload.get("code") or "")
         return f"Draft generated for {payload.get('file', 'file')} in {payload.get('mode', 'edit')} mode; {code_len} characters of code."
@@ -595,6 +637,7 @@ def _artifact_type(name: str) -> str:
         "review_diff": "diff_summary",
         "audit_issue": "issue_audit",
         "dependency_analysis": "dependency_graph",
+        "store_context_note": "context_note",
         "route_analysis": "routes",
         "draft_file": "draft",
         "scaffold_files": "scaffold",
@@ -673,6 +716,53 @@ def _pop_response_mode(arguments: dict[str, Any]) -> tuple[dict[str, Any], str]:
     return rest_arguments, mode
 
 
+def _normalize_investigate_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Preserve compatibility with callers that send repo paths as allowed_scopes."""
+    normalized = dict(arguments)
+    raw_scopes = normalized.get("allowed_scopes")
+    if not isinstance(raw_scopes, list):
+        return normalized
+
+    valid_scopes = [scope for scope in raw_scopes if scope in CAPABILITY_SCOPES]
+    path_scopes = [
+        scope
+        for scope in raw_scopes
+        if isinstance(scope, str)
+        and scope not in CAPABILITY_SCOPES
+        and "/" in scope
+        and not scope.startswith("/")
+        and ".." not in scope.split("/")
+    ]
+    invalid_scopes = [
+        scope
+        for scope in raw_scopes
+        if isinstance(scope, str)
+        and scope not in CAPABILITY_SCOPES
+        and scope not in path_scopes
+    ]
+
+    if path_scopes and "repo:read" not in valid_scopes:
+        valid_scopes.append("repo:read")
+    normalized["allowed_scopes"] = valid_scopes or None
+
+    if path_scopes:
+        path_note = (
+            "\n\nCaller path constraints: inspect only these repository paths unless "
+            "the task explicitly requires broader discovery: "
+            + ", ".join(path_scopes)
+        )
+        normalized["task"] = str(normalized.get("task", "")).rstrip() + path_note
+    if invalid_scopes:
+        invalid_note = (
+            "\n\nIgnored invalid allowed_scopes entries. Use capability scopes "
+            "repo:read, memory:read, and engine:read; repository paths belong in "
+            f"the task text. Invalid entries: {invalid_scopes}"
+        )
+        normalized["task"] = str(normalized.get("task", "")).rstrip() + invalid_note
+
+    return normalized
+
+
 async def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     rest_arguments, response_mode = _pop_response_mode(arguments)
     if name == "draft_file":
@@ -681,6 +771,8 @@ async def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     original_arguments = dict(rest_arguments)
 
     if name == "investigate_codebase":
+        rest_arguments = _normalize_investigate_arguments(rest_arguments)
+        original_arguments = dict(rest_arguments)
         initial = await _request_json("POST", "/agents/run", payload=rest_arguments)
         result = await _poll_run("/agents/run/status/{run_id}", initial)
         return _classify_response(name, original_arguments, result, response_mode)
@@ -706,6 +798,7 @@ async def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         "summarize_file": "/summarize",
         "dependency_analysis": "/dependencies",
         "vector_search": "/vector-search",
+        "store_context_note": "/store-context-note",
         "route_analysis": "/routes",
         "draft_file": "/draft",
         "scaffold_files": "/scaffold",

@@ -138,6 +138,42 @@ class IndexRequest(BaseModel):
     paths: list[str] = ["."]
     force: bool = False
 
+
+NoteScope = Literal["repo", "project", "session", "global"]
+
+
+class StoreContextNoteRequest(BaseModel):
+    title: str
+    content: str
+    source: str
+    tags: list[str] = []
+    repo: str
+    scope: NoteScope
+
+    @field_validator("title", "content", "source", "repo")
+    @classmethod
+    def fields_must_not_be_blank(cls, v: str) -> str:
+        value = v.strip()
+        if not value:
+            raise ValueError("field must not be blank")
+        return value
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, v: list[str]) -> list[str]:
+        tags: list[str] = []
+        seen: set[str] = set()
+        for tag in v:
+            normalized = tag.strip()
+            if not normalized:
+                continue
+            key = normalized.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            tags.append(normalized)
+        return tags
+
 class DraftRequest(BaseModel):
     task: str                           # what to implement — be specific
     file: str                           # target file path (relative to REPO_ROOT)

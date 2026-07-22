@@ -35,6 +35,7 @@ from .utils import chunk_text
 from . import tool_registry
 from . import agent_runner
 from .issue_auditor import collect_agent_evidence, findings_from_evidence, insufficient_evidence_findings
+from .metrics import metrics
 
 
 @asynccontextmanager
@@ -75,8 +76,8 @@ app.add_middleware(AuthMiddleware)
 
 
 # NOW import and register modular router endpoints at the end to prevent circular dependency
-from .routes.health import router as health_router, setup, health, healthcheck, debug, get_log_level, set_log_level
-from .routes.repo import router as repo_router, scan, find, routes, dependencies, read, summarize, context, diff_summary
+from .routes.health import router as health_router, setup, health, healthcheck, debug, stats, get_log_level, set_log_level
+from .routes.repo import router as repo_router, scan, find, routes, dependencies, read, summarize, context, store_context_note, diff_summary
 from .routes.vector import router as vector_router, vector_search, index
 from .routes.agents import router as agents_router, draft, scaffold, tools_call, agents_tools, agents_run, agents_run_status, issue_auditor, issue_auditor_status
 

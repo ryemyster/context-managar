@@ -460,6 +460,17 @@ _REGISTRY: dict[str, tuple[dict, Callable, ToolMeta]] = {
 ALL_TOOLS: list[str] = list(_REGISTRY.keys())
 
 
+def scopes_allow_tool(name: str, allowed_scopes: list[str] | None = None) -> bool:
+    """Return whether a tool may run under the supplied capability scopes."""
+    entry = _REGISTRY.get(name)
+    if entry is None:
+        return False
+    meta = entry[2]
+    if allowed_scopes is None or not meta.scopes:
+        return True
+    return any(scope in allowed_scopes for scope in meta.scopes)
+
+
 def get_tool_definitions(names: list[str] | None = None) -> list[dict]:
     """Return Ollama/MCP-compatible tool definition list for the requested tools."""
     keys = names if names else ALL_TOOLS

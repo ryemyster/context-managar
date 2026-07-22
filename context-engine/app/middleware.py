@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from . import config
 from .logger import log, request_id_var
+from .metrics import metrics
 
 _BYPASS_PATHS = {"/health", "/healthcheck", "/setup"}
 
@@ -51,6 +52,7 @@ class RequestLogMiddleware(BaseHTTPMiddleware):
             request_id_var.reset(token)
         dur = time.monotonic() - t0
         ms  = dur * 1000
+        metrics.record_request(request.method, request.url.path, response.status_code, ms)
         slow = ms > config.SLOW_REQUEST_MS
         lvl = log.warning if (response.status_code >= 500 or slow) else log.info
         extra = " SLOW" if slow else ""

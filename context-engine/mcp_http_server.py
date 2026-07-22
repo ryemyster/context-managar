@@ -15,11 +15,12 @@ MCP_HOST = os.getenv("CONTEXT_ENGINE_MCP_HOST", "127.0.0.1")
 MCP_PORT = int(os.getenv("CONTEXT_ENGINE_MCP_PORT", "8089"))
 
 INSTRUCTIONS = (
-    "Context Engine is a read-only junior engineer. Prefer "
+    "Context Engine is a junior engineer. Prefer "
     "investigate_codebase for repository investigation instead of manually "
     "chaining advanced retrieval tools. The existing REST agent owns planning, "
     "repository exploration, memory, verification, repair passes, and evidence. "
     "The senior engineer owns architecture decisions and all repository writes. "
+    "Curated note storage is explicit through store_context_note only. "
     "Large outputs are written to artifacts; MCP returns references and summaries "
     "by default. Read artifacts selectively when additional detail is required."
 )
@@ -222,6 +223,39 @@ async def dependency_analysis(
     if max_chars is not None:
         arguments["max_chars"] = max_chars
     return await _delegate("dependency_analysis", arguments)
+
+
+@mcp.tool(
+    name="store_context_note",
+    description=(
+        "CURATED MEMORY WRITE TOOL. Persist an explicit, reviewable note through "
+        "/store-context-note. Use for plans, architecture decisions, issue "
+        "triage notes, and session carry-forward that should become durable "
+        "memory. Do not use it for raw transcript dumping or automatic "
+        "conversation logging."
+    ),
+)
+async def store_context_note(
+    title: str,
+    content: str,
+    source: str,
+    repo: str,
+    scope: str,
+    tags: list[str] | None = None,
+    mode: str = "auto",
+) -> dict[str, Any]:
+    return await _delegate(
+        "store_context_note",
+        {
+            "title": title,
+            "content": content,
+            "source": source,
+            "repo": repo,
+            "scope": scope,
+            "tags": tags or [],
+            "mode": mode,
+        },
+    )
 
 
 @mcp.tool(

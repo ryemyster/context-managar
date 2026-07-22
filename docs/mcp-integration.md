@@ -50,6 +50,7 @@ Primary tools:
 | `load_context` | `POST /context` | Bounded pre-task context |
 | `review_diff` | `POST /diff-summary` | Risk review after edits |
 | `audit_issue` | Issue-auditor start, then status polling | Evidence-based issue audit |
+| `store_context_note` | `POST /store-context-note` | Durable curated plans, decisions, and triage notes |
 
 Advanced direct tools:
 

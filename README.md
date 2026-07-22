@@ -607,13 +607,17 @@ Configuration examples:
 The MCP service requires the REST service to be running. Its launchd
 configuration forwards to `http://127.0.0.1:8088` by default.
 
-Primary tools are `investigate_codebase`, `load_context`, `review_diff`, and
-`audit_issue`. Advanced direct tools expose `/scan`, `/find`, `/summarize`,
-`/dependencies`, `/routes`, `/draft`, `/scaffold`, and `/vector-search`.
+Primary tools are `investigate_codebase`, `load_context`, `review_diff`,
+`audit_issue`, and `store_context_note`. Advanced direct tools expose `/scan`,
+`/find`, `/summarize`, `/dependencies`, `/routes`, `/draft`, `/scaffold`, and
+`/vector-search`.
 These discovery endpoints are
 reference-first by default; use `/read` or `detail="full"` only when inline
 content is intentional. Orchestrators should prefer
 `investigate_codebase` instead of manually chaining advanced tools.
+`store_context_note` is the only explicit durable-write path; it persists
+curated notes to the artifact store and vector index but never writes to the
+repository.
 
 Runpod infrastructure management uses a separate MCP server and does not replace
 Context Engine MCP. See

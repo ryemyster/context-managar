@@ -30,6 +30,12 @@ def _hash_payload(payload: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()[:16]
 
 
+def make_event_id(tool: str, payload: dict[str, Any], *, timestamp: str | None = None) -> str:
+    ts = timestamp or utc_ts()
+    seed = {"tool": tool, "payload": payload, "timestamp": ts}
+    return f"{tool.replace('/', '-').strip('-')}-{_hash_payload(seed)}"
+
+
 def _ensure_dirs() -> dict[str, Path]:
     root = config.OUTPUT_DIR
     dirs = {
@@ -50,8 +56,7 @@ def write_pending_record(
     """Write a 'running' placeholder record. Returns event_id + metadata for use as run_id."""
     dirs = _ensure_dirs()
     timestamp = utc_ts()
-    seed = {"tool": tool, "request": request, "timestamp": timestamp}
-    event_id = f"{tool.replace('/', '-').strip('-')}-{_hash_payload(seed)}"
+    event_id = make_event_id(tool, {"request": request}, timestamp=timestamp)
 
     record = {
         "event_id": event_id,
@@ -104,8 +109,11 @@ def write_record(
     dirs = _ensure_dirs()
     timestamp = utc_ts()
     if event_id is None:
-        seed = {"tool": tool, "request": request, "response": response, "timestamp": timestamp}
-        event_id = f"{tool.replace('/', '-').strip('-')}-{_hash_payload(seed)}"
+        event_id = make_event_id(
+            tool,
+            {"request": request, "response": response},
+            timestamp=timestamp,
+        )
 
     record = {
         "event_id": event_id,

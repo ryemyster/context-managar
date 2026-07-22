@@ -190,7 +190,23 @@ async def run_agent(
         unknown = [t for t in tools if t not in tool_registry.ALL_TOOLS]
         if unknown:
             raise ValueError(f"unknown tools: {unknown}. Available: {tool_registry.ALL_TOOLS}")
-    tool_defs = tool_registry.get_tool_definitions(tools)
+    available_tools = [
+        name
+        for name in (tools or tool_registry.ALL_TOOLS)
+        if tool_registry.scopes_allow_tool(name, allowed_scopes)
+    ]
+    denied_tools = [
+        name
+        for name in (tools or tool_registry.ALL_TOOLS)
+        if name not in available_tools
+    ]
+    if denied_tools:
+        log.debug(
+            "agent_runner filtered denied tools tools=%s allowed_scopes=%s",
+            denied_tools,
+            allowed_scopes,
+        )
+    tool_defs = tool_registry.get_tool_definitions(available_tools)
     system    = _build_system_prompt(tool_defs, system_prompt)
 
     messages: list[dict] = [
@@ -202,7 +218,7 @@ async def run_agent(
     # Only runs when search_memory is in the allowed tool set (tools=None means all tools).
     memory_ctx = ""
     memory_hits = 0
-    _search_memory_allowed = tools is None or "search_memory" in tools
+    _search_memory_allowed = "search_memory" in available_tools
     if _search_memory_allowed:
         try:
             memory_ctx = await asyncio.wait_for(

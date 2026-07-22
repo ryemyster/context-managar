@@ -46,11 +46,40 @@ def review_diff(*a, **k): return main.review_diff(*a, **k)
 def build_context(*a, **k): return main.build_context(*a, **k)
 from ..models import (
     ScanRequest, FindRequest, DependenciesRequest, RoutesRequest,
-    ReadRequest, SummarizeRequest, ContextRequest, DiffRequest
+    ReadRequest, SummarizeRequest, ContextRequest, DiffRequest,
+    StoreContextNoteRequest,
 )
 from ..response_shaper import limits_for, reference, read_response, shaped_response
 
 router = APIRouter()
+
+
+def _context_note_markdown(req: StoreContextNoteRequest, artifact_id: str) -> str:
+    tags = ", ".join(req.tags) if req.tags else "none"
+    return (
+        f"# {req.title}\n\n"
+        f"- Artifact ID: `{artifact_id}`\n"
+        f"- Source: `{req.source}`\n"
+        f"- Repo: `{req.repo}`\n"
+        f"- Scope: `{req.scope}`\n"
+        f"- Tags: {tags}\n\n"
+        "## Content\n\n"
+        f"{req.content.strip()}\n"
+    )
+
+
+def _context_note_retrieval_hints(req: StoreContextNoteRequest, artifact_id: str) -> dict:
+    hint_terms = [req.title, req.repo, req.scope, req.source, *req.tags]
+    return {
+        "artifact_ref": f"context_note://context_note/{artifact_id}",
+        "vector_query": " ".join(term for term in hint_terms if term),
+        "filters": {
+            "repo": req.repo,
+            "scope": req.scope,
+            "source": req.source,
+            "tags": req.tags,
+        },
+    }
 
 
 @router.post("/scan")
@@ -446,6 +475,47 @@ async def context(req: ContextRequest):
     asyncio.create_task(supabase_vector.store_artifact(written))
     log.debug("POST /context done files=%d vector_hits=%d dur=%.2fs", len(result["files"]), len(result["vector_hits"]), time.monotonic() - t0)
     return response_payload
+
+
+@router.post("/store-context-note")
+async def store_context_note(req: StoreContextNoteRequest):
+    """
+    Persist a curated context note as a durable artifact and index it immediately.
+    """
+    response_payload = {
+        "title": req.title,
+        "content": req.content,
+        "source": req.source,
+        "tags": req.tags,
+        "repo": req.repo,
+        "scope": req.scope,
+        "kind": "context_note",
+    }
+    artifact_id = artifact_store.make_event_id(
+        "context_note",
+        {"request": req.model_dump(), "response": response_payload},
+    )
+    markdown = _context_note_markdown(req, artifact_id)
+    artifacts = artifact_store.write_record(
+        event_id=artifact_id,
+        tool="context_note",
+        request=req.model_dump(),
+        response=response_payload,
+        markdown=markdown,
+    )
+    vector_warnings = await supabase_vector.store_artifact_record(
+        artifacts["record"],
+        source_type="context_note",
+    )
+    retrieval_hints = _context_note_retrieval_hints(req, artifacts["event_id"])
+    return {
+        "artifact_id": artifacts["event_id"],
+        "artifact_path": artifacts["markdown"] or artifacts["record"],
+        "record_path": artifacts["record"],
+        "retrieval_hints": retrieval_hints,
+        "warnings": vector_warnings,
+        "artifacts": artifacts,
+    }
 
 
 @router.post("/diff-summary")

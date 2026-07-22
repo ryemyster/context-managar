@@ -90,6 +90,12 @@ EMBED_DIMENSIONS = 768
 # Cloud deployments MUST set this. Local dev can leave it unset.
 CONTEXT_ENGINE_API_KEY = os.getenv("CONTEXT_ENGINE_API_KEY", "")
 
+# Optional public URLs for deployment-aware /setup output.
+# When unset, /setup derives values from the incoming request and falls back to
+# localhost-oriented defaults for local launchd installs.
+CONTEXT_ENGINE_PUBLIC_BASE_URL = os.getenv("CONTEXT_ENGINE_PUBLIC_BASE_URL", "").strip()
+CONTEXT_ENGINE_PUBLIC_MCP_URL = os.getenv("CONTEXT_ENGINE_PUBLIC_MCP_URL", "").strip()
+
 # ── Logging ────────────────────────────────────────────────────────────────────
 LOG_LEVEL  = os.getenv("LOG_LEVEL",  "INFO").upper()
 LOG_FORMAT = os.getenv("LOG_FORMAT", "text").lower()   # "text" or "json"
@@ -120,4 +126,3 @@ CODE_EXTENSIONS: set[str] = {
 # ── Chunking defaults ──────────────────────────────────────────────────────────
 DEFAULT_CHUNK_SIZE    = int(os.getenv("DEFAULT_CHUNK_SIZE", "500"))
 DEFAULT_CHUNK_OVERLAP = int(os.getenv("DEFAULT_CHUNK_OVERLAP", "50"))
-

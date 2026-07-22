@@ -54,6 +54,7 @@ async def test_tools_list_has_primary_tools_first_and_advanced_tools_last():
         "summarize_file",
         "dependency_analysis",
         "vector_search",
+        "store_context_note",
         "route_analysis",
         "draft_file",
         "scaffold_files",
@@ -61,6 +62,8 @@ async def test_tools_list_has_primary_tools_first_and_advanced_tools_last():
     assert "PRIMARY DELEGATION TOOL" in tools[0]["description"]
     assert "Large outputs are written to artifacts" in tools[0]["description"]
     assert all(tool["inputSchema"]["additionalProperties"] is False for tool in tools)
+    store_tool = next(tool for tool in tools if tool["name"] == "store_context_note")
+    assert store_tool["annotations"]["readOnlyHint"] is False
 
 
 @pytest.mark.asyncio
@@ -96,6 +99,39 @@ async def test_investigate_codebase_starts_and_polls_agent_run():
         "GET",
         "/agents/run/status/run-1",
     )
+
+
+@pytest.mark.asyncio
+async def test_investigate_codebase_converts_path_allowed_scopes_to_task_constraints():
+    responses = [
+        {"run_id": "run-1", "status": "running"},
+        {
+            "run_id": "run-1",
+            "status": "complete",
+            "final_answer": "Done.",
+            "tool_calls_made": [],
+            "iterations": 1,
+        },
+    ]
+
+    with (
+        patch.object(
+            mcp, "_request_json", new_callable=AsyncMock, side_effect=responses
+        ) as request,
+        patch.object(mcp.asyncio, "sleep", new_callable=AsyncMock),
+    ):
+        await mcp._call_tool(
+            "investigate_codebase",
+            {
+                "task": "Inspect the app",
+                "allowed_scopes": ["owner/repo/app", "owner/repo/tests"],
+            },
+        )
+
+    payload = request.await_args_list[0].kwargs["payload"]
+    assert payload["allowed_scopes"] == ["repo:read"]
+    assert "Caller path constraints" in payload["task"]
+    assert "owner/repo/app, owner/repo/tests" in payload["task"]
 
 
 @pytest.mark.asyncio
@@ -142,6 +178,7 @@ async def test_audit_issue_starts_and_polls_auditor():
         ("summarize_file", "/summarize"),
         ("dependency_analysis", "/dependencies"),
         ("vector_search", "/vector-search"),
+        ("store_context_note", "/store-context-note"),
         ("route_analysis", "/routes"),
         ("scaffold_files", "/scaffold"),
     ],
