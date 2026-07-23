@@ -41,6 +41,8 @@ async def test_setup_is_context_safe_operational_playbook():
     assert "**Context-Safe Mode**" in body
     assert "**Agent Loop Budget**" in body
     assert "max_iterations: 15" in body
+    assert "**Clarification Gate**" in body
+    assert "return 1-3 concrete questions to the caller" in body
     assert "**Scope Contract**" in body
     assert "Put path restrictions in the task text, not in `allowed_scopes`" in body
     assert "**Diff Verification**" in body
@@ -58,6 +60,7 @@ async def test_setup_is_context_safe_operational_playbook():
     assert "**Rules for Orchestrators:**" in body
     assert "stopped_reason: max_iterations" in body
     assert "Do not treat the artifact summary as a conclusive answer" in body
+    assert "If an agent or endpoint returns clarification questions" in body
     assert "With MCP `mode=context_safe`, expect a compact artifact reference/summary" in body
 
 
