@@ -13,10 +13,16 @@ The calling code must never crash because vector ops failed.
 """
 
 import hashlib
+import json
+import time
+from pathlib import Path
 from typing import Any
 import httpx
 from . import config
 from .logger import log
+from .metrics import metrics
+from .inference import inference
+from .utils import chunk_text
 
 _client: httpx.AsyncClient | None = None
 _vector_ready: bool | None = None   # cached after first check
@@ -58,6 +64,7 @@ async def is_available() -> bool:
         return False
 
     try:
+        started = time.monotonic()
         # Query table with limit 0 just to check it exists
         r = await client.get(
             f"/rest/v1/{config.SUPABASE_VECTOR_TABLE}",
@@ -65,9 +72,19 @@ async def is_available() -> bool:
             headers=_headers(),
         )
         _vector_ready = r.status_code in (200, 206)
+        metrics.record_vector(
+            operation="supabase_is_available",
+            duration_ms=(time.monotonic() - started) * 1000,
+            outcome="success" if _vector_ready else f"http_{r.status_code}",
+        )
         log.debug("supabase vector check status=%d ready=%s", r.status_code, _vector_ready)
         return _vector_ready
     except Exception as e:
+        metrics.record_vector(
+            operation="supabase_is_available",
+            duration_ms=(time.monotonic() - started) * 1000 if 'started' in locals() else 0,
+            outcome="error",
+        )
         log.warning("supabase vector check failed: %s", e)
         _vector_ready = False
         return False
@@ -79,9 +96,20 @@ async def is_supabase_reachable() -> bool:
     if client is None:
         return False
     try:
+        started = time.monotonic()
         r = await client.get("/rest/v1/", headers=_headers(), timeout=3.0)
+        metrics.record_vector(
+            operation="supabase_reachable",
+            duration_ms=(time.monotonic() - started) * 1000,
+            outcome="success" if r.status_code < 500 else f"http_{r.status_code}",
+        )
         return r.status_code < 500
     except Exception:
+        metrics.record_vector(
+            operation="supabase_reachable",
+            duration_ms=(time.monotonic() - started) * 1000 if 'started' in locals() else 0,
+            outcome="error",
+        )
         return False
 
 
@@ -95,15 +123,25 @@ async def already_indexed(hash_val: str) -> bool:
     if client is None:
         return False
     try:
+        started = time.monotonic()
         r = await client.get(
             f"/rest/v1/{config.SUPABASE_VECTOR_TABLE}",
             params={"chunk_hash": f"eq.{hash_val}", "select": "id", "limit": "1"},
             headers=_headers(),
         )
+        metrics.record_vector(
+            operation="supabase_already_indexed",
+            duration_ms=(time.monotonic() - started) * 1000,
+            outcome="success" if r.status_code == 200 else f"http_{r.status_code}",
+        )
         if r.status_code == 200:
             return len(r.json()) > 0
     except Exception:
-        pass
+        metrics.record_vector(
+            operation="supabase_already_indexed",
+            duration_ms=(time.monotonic() - started) * 1000 if 'started' in locals() else 0,
+            outcome="error",
+        )
     return False
 
 
@@ -123,6 +161,7 @@ async def upsert_chunk(
     hash_val = chunk_hash(path, chunk)
 
     try:
+        started = time.monotonic()
         r = await client.post(
             f"/rest/v1/{config.SUPABASE_VECTOR_TABLE}",
             json={
@@ -136,8 +175,19 @@ async def upsert_chunk(
                 "Prefer": "resolution=merge-duplicates",
             },
         )
-        return r.status_code in (200, 201)
+        ok = r.status_code in (200, 201)
+        metrics.record_vector(
+            operation="supabase_upsert_chunk",
+            duration_ms=(time.monotonic() - started) * 1000,
+            outcome="success" if ok else f"http_{r.status_code}",
+        )
+        return ok
     except Exception:
+        metrics.record_vector(
+            operation="supabase_upsert_chunk",
+            duration_ms=(time.monotonic() - started) * 1000 if 'started' in locals() else 0,
+            outcome="error",
+        )
         return False
 
 
@@ -157,6 +207,7 @@ async def search(
 
     log.debug("supabase vector search limit=%d threshold=%.2f", limit, threshold)
     try:
+        started = time.monotonic()
         r = await client.post(
             f"/rest/v1/rpc/{config.SUPABASE_MATCH_FUNCTION}",
             json={
@@ -168,11 +219,62 @@ async def search(
         )
         if r.status_code == 200:
             results = r.json() or []
+            metrics.record_vector(
+                operation="supabase_search",
+                duration_ms=(time.monotonic() - started) * 1000,
+                outcome="success",
+            )
             log.debug("supabase vector search done hits=%d", len(results))
             return results
+        metrics.record_vector(
+            operation="supabase_search",
+            duration_ms=(time.monotonic() - started) * 1000,
+            outcome=f"http_{r.status_code}",
+        )
     except Exception as e:
+        metrics.record_vector(
+            operation="supabase_search",
+            duration_ms=(time.monotonic() - started) * 1000 if 'started' in locals() else 0,
+            outcome="error",
+        )
         log.warning("supabase vector search failed: %s", e)
     return []
+
+
+async def vector_row_count() -> int | None:
+    client = get_client()
+    if client is None:
+        return None
+    started = time.monotonic()
+    try:
+        r = await client.get(
+            f"/rest/v1/{config.SUPABASE_VECTOR_TABLE}",
+            params={"select": "id", "limit": "0"},
+            headers={**_headers(), "Prefer": "count=exact"},
+        )
+        if r.status_code not in (200, 206):
+            metrics.record_vector(
+                operation="supabase_row_count",
+                duration_ms=(time.monotonic() - started) * 1000,
+                outcome=f"http_{r.status_code}",
+            )
+            return None
+        content_range = r.headers.get("content-range", "")
+        count = int(content_range.split("/")[1]) if "/" in content_range else None
+        metrics.record_vector(
+            operation="supabase_row_count",
+            duration_ms=(time.monotonic() - started) * 1000,
+            outcome="success",
+        )
+        return count
+    except Exception as exc:
+        metrics.record_vector(
+            operation="supabase_row_count",
+            duration_ms=(time.monotonic() - started) * 1000,
+            outcome="error",
+        )
+        log.warning("supabase row count failed: %s", exc)
+        return None
 
 
 async def store_artifact(file_path: str) -> None:
@@ -183,9 +285,6 @@ async def store_artifact(file_path: str) -> None:
     if not await is_available():
         return
     try:
-        from pathlib import Path
-        from . import ollama_client
-
         path = Path(file_path)
         if not path.exists():
             return
@@ -193,14 +292,14 @@ async def store_artifact(file_path: str) -> None:
         if not content.strip():
             return
 
-        chunks = _chunk_text(content)
+        chunks = chunk_text(content)
         for chunk in chunks:
             if not chunk.strip():
                 continue
             h = chunk_hash(file_path, chunk)
             if await already_indexed(h):
                 continue
-            embedding = await ollama_client.embed(f"{path.name}\n{chunk}")
+            embedding = await inference.embed(f"{path.name}\n{chunk}")
             if embedding:
                 await upsert_chunk(file_path, chunk, embedding)
         log.debug("store_artifact done path=%s chunks=%d", path.name, len(chunks))
@@ -208,12 +307,71 @@ async def store_artifact(file_path: str) -> None:
         log.warning("store_artifact failed path=%s: %s", file_path, e)
 
 
-def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
-    chunks, start = [], 0
-    while start < len(text):
-        chunks.append(text[start:min(start + chunk_size, len(text))])
-        start += chunk_size - overlap
-    return chunks
+async def store_artifact_record(record_path: str, *, source_type: str = "artifact") -> list[str]:
+    """
+    Index a canonical artifact JSON record into the vector store.
+    Returns a list of warning strings for any upsert failures (empty on full success).
+
+    The vector table is still a derived cache. The path is namespaced so artifact
+    memory can be distinguished from repo code chunks even before a richer vector
+    schema is introduced.
+    """
+    warnings: list[str] = []
+    if not await is_available():
+        return warnings
+    try:
+        path = Path(record_path)
+        if not path.exists():
+            return warnings
+
+        raw = path.read_text(encoding="utf-8")
+        if not raw.strip():
+            return warnings
+
+        try:
+            record = json.loads(raw)
+        except Exception:
+            record = {}
+
+        event_id = record.get("event_id") or path.stem
+        tool = record.get("tool") or "unknown"
+        vector_path = f"{source_type}://{tool}/{event_id}"
+        searchable = json.dumps(
+            {
+                "source_type": source_type,
+                "event_id": event_id,
+                "tool": tool,
+                "status": record.get("status"),
+                "request": record.get("request"),
+                "response": record.get("response"),
+            },
+            sort_keys=True,
+            default=str,
+        )
+
+        chunks = chunk_text(searchable)
+        for chunk in chunks:
+            if not chunk.strip():
+                continue
+            h = chunk_hash(vector_path, chunk)
+            if await already_indexed(h):
+                continue
+            embedding = await inference.embed(f"{vector_path}\n{chunk}")
+            if embedding:
+                ok = await upsert_chunk(vector_path, chunk, embedding)
+                if not ok:
+                    msg = f"vector upsert failed for {vector_path}"
+                    warnings.append(msg)
+                    log.warning("store_artifact_record upsert failed path=%s", vector_path)
+        log.debug("store_artifact_record done path=%s chunks=%d warnings=%d", vector_path, len(chunks), len(warnings))
+    except Exception as e:
+        msg = f"store_artifact_record failed for {record_path}: {e}"
+        warnings.append(msg)
+        log.warning("store_artifact_record failed path=%s: %s", record_path, e)
+    return warnings
+
+
+
 
 
 async def reset_cache() -> None:

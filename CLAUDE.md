@@ -6,10 +6,14 @@ This IS the context engine. Changes here affect every project that uses it as a 
 
 ```
 context-engine/
+  mcp_server.py        — shared thin MCP → REST adapter; no agent business logic
+  mcp_http_server.py   — persistent Streamable HTTP transport on :8089/mcp
+  requirements-mcp.txt — isolated MCP service dependencies
   app/
     main.py            — all routes + /setup doc (update /setup when adding endpoints)
-    config.py          — env vars and constants — single source of truth
-    ollama_client.py   — generate() · generate_reasoning() · embed()
+    config.py          — legacy-compatible app settings and constants
+    inference/         — provider-neutral generation, chat, and embeddings
+      config.py        — provider endpoints, credentials, and role models
     models.py          — Pydantic request/response models
     markdown_writer.py — write_*() per endpoint + LRU eviction (_evict_if_needed)
     supabase_vector.py — pgvector client + store_artifact() background indexer
@@ -26,22 +30,38 @@ context-engine/
 .env.example           — template for all configurable vars
 supabase/migrations/   — SQL applied via db query --linked (not db push)
 scripts/               — shell wrappers for each endpoint
+  install-mcp.sh       — install/restart the MCP launchd service
+config/                — Claude Code and Codex MCP configuration examples
+docs/mcp-integration.md — MCP tools, installation, examples, and curl migration
 ```
 
-## Three-model stack
+## Inference roles
 
-| Model | Env var | Used by |
-|-------|---------|---------|
-| `qwen3.5:9b` | `OLLAMA_REASON_MODEL` | `/diff-summary` |
-| `qwen2.5-coder:3b` | `OLLAMA_MODEL` | `/context`, `/draft`, `/scaffold`, `/scan`, `/find`, `/summarize` |
-| `nomic-embed-text` | `OLLAMA_EMBED_MODEL` | `/index`, `/vector-search`, `/context` (vector step) |
+| Role | Configuration | Used by |
+|------|---------------|---------|
+| Reasoning | `INFERENCE_REASONING_MODEL` | `/diff-summary` |
+| Agent | `INFERENCE_AGENT_MODEL` | `/agents/run` structured selection and answer generation |
+| Selection fallback / verification | `INFERENCE_SELECTION_MODEL` / `INFERENCE_VERIFICATION_MODEL` | `/agents/run` fallback tool calling and evidence verification |
+| Fast | `INFERENCE_FAST_MODEL` | `/context`, `/draft`, `/scaffold`, `/scan`, `/find`, `/summarize` |
+| Embedding | `INFERENCE_EMBEDDING_MODEL` | `/index`, `/vector-search`, `/context` |
 
-**Routing rule:** `/diff-summary` → `generate_reasoning()` (risk analysis is judgment). Everything else → `generate()` (code pattern matching) or `embed()`. `/context` uses code model for synthesis — relevance scoring is pattern matching, not reasoning.
+The `INFERENCE_*` values fall back to the existing `OLLAMA_*` variables.
+Generation and embedding providers are configured independently. Keep
+embeddings on Ollama with `nomic-embed-text` unless intentionally migrating and
+re-indexing the 768-dimensional Supabase corpus. See
+`docs/inference-service.md`.
+Runpod provisioning, MCP management, security, and model selection are
+documented in `docs/runpod-mcp-ollama.md`.
+
+Code outside `app/inference/` must not import provider implementations.
 
 ## Service management (launchd)
 
-Native Python/uvicorn process — no Docker. Plist:
+Current deployment is native Python/uvicorn. REST binds `0.0.0.0:8088`. Plist:
 `~/Library/LaunchAgents/life.ascendvent.context-manager.plist`
+
+The MCP transport is a separate service:
+`~/Library/LaunchAgents/life.ascendvent.context-engine-mcp.plist`
 
 Auto-starts on login, restarts on crash (KeepAlive=true).
 
@@ -54,17 +74,32 @@ launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
 
 # Start
 launchctl load ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+
+# Install/restart MCP transport
+bash scripts/install-mcp.sh
 ```
+
+Use `bash scripts/install-native.sh` after Python or `.env` changes. The
+installer parses the repository-root `.env`, generates the plist, and restarts
+the service; the application does not load `.env` itself.
 
 ## Logs
 
-All stdout and stderr go to `~/Library/Logs/context-manager.log`.
+Two services, two log files:
+
+| Service | Log file |
+|---|---|
+| REST API (`:8088`) | `~/Library/Logs/context-manager.log` |
+| MCP transport (`:8089/mcp`) | `~/Library/Logs/context-engine-mcp.log` |
 
 ```bash
-# Follow live
+# Follow REST API live
 tail -f ~/Library/Logs/context-manager.log
 
-# Last 50 lines
+# Follow MCP transport live
+tail -f ~/Library/Logs/context-engine-mcp.log
+
+# Last 50 lines (REST)
 tail -50 ~/Library/Logs/context-manager.log
 
 # Filter errors only
@@ -84,6 +119,12 @@ Key lines to look for:
 - `store_artifact done` — artifact indexed to Supabase successfully
 - `store_artifact failed` — background indexing error (non-fatal)
 - `SLOW` — request exceeded `SLOW_REQUEST_MS` threshold (default 5s)
+
+> **If `tail -f` reports "No such file or directory":** newsyslog rotated the log but launchd cannot reopen its stdout/stderr fd. Restart the service to recreate the file:
+> ```bash
+> launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+> launchctl load  ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+> ```
 
 ### Log rotation (newsyslog)
 
@@ -126,11 +167,28 @@ curl -s http://localhost:8088/health | python3 -m json.tool
 
 Never assume a change works by reading the code. Always curl the endpoint.
 
+## Dev workflow — running tests
+
+```bash
+# From the repo root
+context-engine/.venv/bin/python3 -m pytest
+
+# Verbose
+context-engine/.venv/bin/python3 -m pytest -v
+
+# Single test file
+context-engine/.venv/bin/python3 -m pytest tests/test_agent_runner.py -v
+```
+
+Tests mock external inference and network services and use isolated temporary
+filesystem state. They are safe to run offline.
+The venv has `include-system-site-packages = true` so system packages (httpx, pydantic, fastapi) are visible.
+
 ## Dev workflow — adding a Python dependency
 
 ```bash
-# Install into the venv
-context-engine/.venv/bin/pip install <package>
+# Install into the venv using python3 -m pip (the pip shebang may point to a stale path)
+context-engine/.venv/bin/python3 -m pip install <package>
 
 # Pin it in requirements.txt
 echo "<package>==<version>" >> context-engine/requirements.txt
@@ -143,8 +201,8 @@ launchctl load  ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
 If setting up on a new machine from scratch:
 ```bash
 cd context-engine
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+python3 -m venv .venv --system-site-packages
+.venv/bin/python3 -m pip install -r requirements.txt
 ```
 
 ## Database — schema migrations (Supabase cloud)
@@ -174,7 +232,7 @@ supabase db query --linked "SELECT count(*) FROM code_embeddings;"
 
 ## Artifacts — output store
 
-Every endpoint writes two places:
+Inference and agent workflows that produce artifacts write two places:
 1. **Supabase cloud** — embedded + upserted as vector chunks (primary, searchable across sessions)
 2. **Disk backup** — `~/Library/Application Support/context-store/artifacts/` (crash recovery)
 
@@ -246,6 +304,18 @@ Use the `/endpoint` agent to scaffold the pattern.
 Path prefix: `ryemyster/context-manager`
 App source: `ryemyster/context-manager/context-engine/app`
 
+Use the `context-engine` MCP server for normal agent interaction:
+
+```text
+investigate_codebase(
+  task="Read-only investigation for ryemyster/context-manager. Return evidence files, conclusions, and verification."
+)
+```
+
+`investigate_codebase` is the primary workflow: `find → assess → read → act → verify`. See `.claude/rules/context-engine.md` for the full confidence-gate decision table.
+
+REST remains available for compatibility and troubleshooting:
+
 ```bash
 curl -s -X POST http://localhost:8088/context \
   -H "Content-Type: application/json" \
@@ -258,3 +328,9 @@ curl -s -X POST http://localhost:8088/context \
 - Never write to the repo — the engine is read-only on `REPO_ROOT`
 - `config.py` is the single source of truth for all env vars — never `os.getenv()` outside it
 - Always update `/setup` when adding or changing an endpoint — it's the agent contract
+- Keep `mcp_server.py` transport-only; it may map, poll, and shape REST responses but must not duplicate agent logic
+- Keep `mcp_http_server.py` as a persistent transport wrapper over `mcp_server.py`
+- Put primary delegation tools before advanced direct tools and keep descriptions explicit about preferring `investigate_codebase`
+- `CONTEXT_ENGINE_API_KEY` in `config.py` — empty disables auth, non-empty
+  enforces it; health/setup endpoints remain exempt. REST currently binds
+  `0.0.0.0`, so an empty key is not inherently localhost-only.

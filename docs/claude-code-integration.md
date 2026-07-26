@@ -1,245 +1,138 @@
-# Integrating context-engine with Claude Code
+# Integrating Context Engine With Claude Code
 
-**context-engine is the scout. Claude Code is the engineer.**
+Context Engine is the junior engineer. Claude plans, reviews evidence, makes
+architecture decisions, and owns every repository write.
 
-Use this document when setting up a new project that should use context-engine for pre-session context loading.
-
----
-
-## What context-engine does for you
-
-Before you give Claude a task, context-engine:
-1. Walks your repo (deterministic, zero model cost)
-2. Greps for focus terms
-3. Runs semantic vector search (nomic-embed-text → Supabase)
-4. Synthesizes into a compact context bundle (one qwen call)
-
-Result: `./ai-context/context-bundle.md` — a ~500-token scout report Claude reads instead of walking your repo itself (~5,000+ tokens).
-
----
+The preferred transport is MCP. REST remains available for scripts,
+compatibility, and troubleshooting.
 
 ## Prerequisites
 
-- `context-engine` running: `curl http://localhost:8088/healthcheck` returns `{"ok":true,...}`
-- If not running: `cd ~/Repos/ryemyster/local-model && bash scripts/start-context.sh`
-
----
-
-## Self-configuration (fastest path)
-
-In any new Claude Code session, just say:
-
-```
-Run: `curl -s http://localhost:8088/setup` and use it to configure this project to use context-engine
-```
-
-Claude reads the live Markdown — with current status already filled in — and handles everything:
-writes the CLAUDE.md block, creates the slash command, tells you whether to run `/index`.
-
----
-
-## Per-project setup (manual)
-
-### 1. Point context-engine at your repo
-
-In `.env` at the repo root:
-```
-REPO_PATH=/path/to/your/project
-```
-
-Then restart (no rebuild needed — it's plain Python):
 ```bash
-launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
-launchctl load  ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+curl -sf http://localhost:8088/healthcheck
+```
+
+If the service is not running:
+
+```bash
+launchctl load ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
+```
+
+## Install
+
+```bash
+bash scripts/install-mcp.sh
+claude mcp add --scope user --transport http \
+  context-engine http://127.0.0.1:8089/mcp
 ```
 
 Verify:
+
 ```bash
-curl http://localhost:8088/healthcheck
-# {"ok":true,"model":"qwen2.5-coder:3b","repo":"/path/to/your/project"}
+claude mcp get context-engine
 ```
 
-### 2. Add CLAUDE.md to your project
+For project configuration, adapt
+[`../config/claude-code.mcp.json.example`](../config/claude-code.mcp.json.example)
+as `.mcp.json`.
 
-Copy the rule below into your project's `CLAUDE.md` or `.claude/rules/context-engine.md`:
+## Primary Workflow
+
+Use `investigate_codebase` for repository questions:
+
+```text
+investigate_codebase(
+  task="Determine whether authentication protects all agent endpoints. Return route evidence, middleware evidence, gaps, and verification."
+)
+```
+
+The adapter calls `POST /agents/run`, polls
+`GET /agents/run/status/{run_id}`, and returns the completed response. Claude
+does not need to orchestrate scans, greps, reads, or polling.
+
+Check:
+
+- `tool_calls_made` for the evidence trail
+- `plan_state` for the junior's plan
+- `verification.passed` and `verification.unsupported_claims`
+- `final_answer` for the conclusion
+
+Verify cited source files before implementing or making issue decisions.
+
+## Other Tools
+
+| Tool | Use |
+|---|---|
+| `load_context` | Bounded context bundle before implementation |
+| `review_diff` | Risks and test recommendations after editing |
+| `audit_issue` | Evidence-based issue audit |
+| `store_context_note` | Durable curated plans, decisions, and triage notes |
+
+Advanced tools are `scan_directory`, `find_in_code`, `summarize_file`,
+`dependency_analysis`, `route_analysis`, `draft_file`, `scaffold_files`, and
+`vector_search`. Use them only for a single bounded operation. Do not manually
+chain them when `investigate_codebase` can own the investigation.
+
+Discovery tools return compact references by default. Treat their output as an
+index: inspect `path` and `summary`, then fetch exact source content only when
+needed with `/read` or an explicit full-detail tool call. For advanced direct
+discovery, use `mode=context_safe` first; if the result is thin, has too few
+hits, or lacks enough content to choose the next read, make one re-call without
+the mode flag before escalating to broader reading.
+
+## Project Rule
+
+Add this to `CLAUDE.md` or `.claude/rules/context-engine.md`:
 
 ```markdown
 ## Context Engine
 
-A local context-engine runs at http://localhost:8088.
-Before starting any non-trivial task, run:
-
-  bash ~/Repos/ryemyster/local-model/scripts/context.sh "your task description" "src/app,src/lib" "key,terms"
-
-Then read ./ai-context/context-bundle.md before planning or editing.
-
-Scripts available:
-  context.sh      — full context bundle (primary workflow)
-  scan.sh         — scan a directory
-  find.sh         — grep + synthesize
-  routes.sh       — extract Next.js routes
-  dependencies.sh — map imports
-  summarize.sh    — summarize a single file
-  diff-summary.sh — review a git diff (pipe: git diff | diff-summary.sh)
-  vector-search.sh — semantic search (requires indexed data)
-  index.sh        — index repo into vector store (run before session)
-
-Health:  curl http://localhost:8088/healthcheck
-Debug:   curl http://localhost:8088/debug
-Setup:   curl http://localhost:8088/setup
-Docs:    http://localhost:8088/docs
+Use the `context-engine` MCP server for non-trivial repository work.
+Prefer `investigate_codebase` for repository investigation; do not manually
+orchestrate advanced retrieval tools when delegation fits.
+Use `load_context` for bounded pre-task context and `review_diff` after edits.
+For advanced direct discovery, use `mode=context_safe` first; if results are
+thin, make one re-call without the mode flag before broadening reads.
+Context Engine never writes to the repository. It may persist explicit curated
+notes through `store_context_note`. Verify its evidence and own all file writes
+and decisions. If the service is unavailable, continue without it.
 ```
 
-### 3. Add the /context slash command (optional)
+## Authentication And Remote REST
 
-Create `.claude/commands/context.md` in your project:
+The persistent MCP launchd service reads:
 
-```markdown
-Run the context-engine scout before implementing the task.
-
-1. Run: bash ~/Repos/ryemyster/local-model/scripts/context.sh "$ARGUMENTS" "src/app,src/lib" ""
-2. Read: ./ai-context/context-bundle.md
-3. Report what was found (files, risks, vector hits), then ask what to implement.
+```text
+CONTEXT_ENGINE_URL=http://localhost:8088
+CONTEXT_ENGINE_PUBLIC_BASE_URL=https://context.example.com
+CONTEXT_ENGINE_PUBLIC_MCP_URL=https://context.example.com/mcp
+CONTEXT_ENGINE_API_KEY=<optional secret>
+CONTEXT_ENGINE_MCP_HOST=127.0.0.1
+CONTEXT_ENGINE_MCP_PORT=8089
 ```
 
-Then type `/context add stripe enforcement to checkins` in Claude Code and it auto-runs.
+Set these before running `scripts/install-mcp.sh` when overriding defaults. The
+REST API key is forwarded as `X-API-Key`.
 
-### 4. Index your repo before each session
+`GET /setup` prefers `CONTEXT_ENGINE_PUBLIC_BASE_URL` and
+`CONTEXT_ENGINE_PUBLIC_MCP_URL` when present. Set them for remote or cloud
+deployments so generated agent bootstrap commands reference the public endpoint
+rather than the local launchd defaults.
+
+The adapter implements this forwarding, but `scripts/install-mcp.sh` currently
+does not persist `CONTEXT_ENGINE_API_KEY` in the generated launchd plist. An
+authenticated remote REST deployment requires updating that plist or installer
+before the persistent MCP service will work.
+
+## REST Compatibility
+
+Existing REST clients remain unchanged:
 
 ```bash
-bash ~/Repos/ryemyster/local-model/scripts/index.sh "src/app,src/lib,supabase"
+curl -s -X POST http://localhost:8088/agents/run \
+  -H "Content-Type: application/json" \
+  -d '{"task":"Investigate authentication coverage"}'
 ```
 
-Stores nomic-embed-text embeddings in Supabase so `/vector-search` and `/context` return
-semantically relevant results. Re-run when the codebase changes significantly.
-
----
-
-## The daily workflow
-
-```
-1. Open a new Claude Code session
-
-2. Index if code changed since last session:
-   bash ~/Repos/ryemyster/local-model/scripts/index.sh "src/app,src/lib"
-
-3. Before giving Claude a task:
-   bash ~/Repos/ryemyster/local-model/scripts/context.sh \
-     "Add plan enforcement to check-in generation" \
-     "src/app,src/lib,supabase" \
-     "auth,stripe,checkins"
-
-4. Tell Claude:
-   "Read ./ai-context/context-bundle.md then implement:
-    Add plan enforcement to check-in generation"
-
-5. Claude reads the pre-digested scout report (~500 tokens), verifies source files, implements.
-
-6. After Claude edits, review the diff:
-   git diff | bash ~/Repos/ryemyster/local-model/scripts/diff-summary.sh
-
-7. Claude reviews diff summary + signs off.
-```
-
----
-
-## Switching between projects
-
-You can only point context-engine at **one repo at a time**. To switch:
-
-```bash
-# Edit REPO_PATH in .env
-sed -i '' 's|^REPO_PATH=.*|REPO_PATH=/path/to/other-project|' .env
-
-# Restart (no rebuild needed)
-launchctl unload ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
-launchctl load  ~/Library/LaunchAgents/life.ascendvent.context-manager.plist
-
-# Verify the new repo is mounted
-curl http://localhost:8088/healthcheck
-```
-
----
-
-## Monitoring endpoints
-
-| Endpoint | Use case | Returns |
-|---|---|---|
-| `GET /healthcheck` | Health checks, monitors, scripts | HTTP 200 `{"ok":true}` or HTTP 503 `{"ok":false,"reason":"..."}` |
-| `GET /health` | Full status check | JSON with all service states, always HTTP 200 |
-| `GET /debug` | Troubleshooting | Model loaded, vector row count, all output files, config, tips |
-| `GET /setup` | Configure a new project | Live Markdown Claude can read and act on |
-
-### /healthcheck — for automation
-Returns 200 only when Ollama is reachable, both models are available, and the repo is mounted.
-Use this in scripts, CI, or health monitors.
-
-```bash
-curl -sf http://localhost:8088/healthcheck && echo "up" || echo "DOWN"
-```
-
-### /debug — when something feels wrong
-Shows exactly what's loaded, how many vector rows exist, and what output files are in `ai-context/`:
-
-```bash
-curl http://localhost:8088/debug | python3 -m json.tool
-```
-
-Key fields to check:
-- `ollama_loaded` — which model is currently in memory (null = no model loaded yet)
-- `vector_row_count` — how many chunks are indexed; 0 means `/index` hasn't been run
-- `config.supabase_key_set` — false means `.env` still has the placeholder key
-- `tips` — common failure patterns with specific fixes
-
-### /setup — self-configure any project
-Returns live Markdown. Claude can fetch and act on it directly:
-
-```
-Run: `curl -s http://localhost:8088/setup` and use it to configure this project
-```
-
----
-
-## Memory expectations (M3 Air 8GB)
-
-| Operation | RAM used | Duration |
-|---|---|---|
-| Idle (no model loaded) | ~3.3 GB | — |
-| `/scan`, `/find`, `/summarize` | ~5.1 GB | 30-90s |
-| `/index`, `/vector-search` | ~3.6 GB | 2-10s per chunk |
-| `/context` (both models) | ~5.4 GB peak | 60-150s |
-
-One model at a time. Don't run concurrent requests. Don't pull 7b models.
-
----
-
-## Troubleshooting
-
-**Start here: `curl http://localhost:8088/debug | python3 -m json.tool`**
-
-The `tips` field in `/debug` maps each failure to its fix. Below is the quick reference.
-
-**Empty vector search results**
-- Check `vector_row_count` in `/debug` — if 0, run `/index` first
-- After running qwen endpoints, nomic needs up to 30s to swap in — built-in 90s timeout handles it
-- Check `vector_ready: true` in `/health`
-
-**Model timeout on /scan or /context**
-- Scope your path: `context.sh "task" "src/app/api"` not the full repo root
-- Retry once — model may have been cold-loading (~30s on first call)
-
-**`/healthcheck` returns 503**
-- Check `reason` field in the response body
-- `model not available` → Ollama is down: `ollama list` to check, `ollama serve` to start
-- `repo not mounted` → `REPO_PATH` in `.env` doesn't exist
-
-**Wrong repo being scanned**
-- Check `repo_root` in `/health` or `/debug`
-- Update `REPO_PATH` in `.env` → restart with launchctl unload/load
-
-**`supabase_key_set: false` in /debug**
-- `.env` still has placeholder key — get real key from Supabase Studio → Settings → API → `service_role`
-
-**Port 8088 taken**
-- `lsof -i :8088` — find and stop the conflicting process first
-- Then restart: launchctl unload/load the plist
+Use REST for shell automation, diagnostics, or clients without MCP. Fetch
+`GET /setup` for the agent usage and repository integration playbook.

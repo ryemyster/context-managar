@@ -1,0 +1,2 @@
+{"model":"qwen3.5:9b","created_at":"2026-06-17T05:57:20.188956Z","response":"OK","done":false}
+{"model":"qwen3.5:9b","created_at":"2026-06-17T05:57:20.369394Z","response":"","done":true,"done_reason":"stop","context":[248045,846,198,20206,1132,440,279,3299,10092,13,248046,198,248045,74455,198,248068,271,248069,271,3793],"total_duration":839757667,"load_duration":373194084,"prompt_eval_count":19,"prompt_eval_duration":284640000,"eval_count":2,"eval_duration":180282000}

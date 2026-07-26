@@ -1,0 +1,562 @@
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:11.88713Z","response":"Managed","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:11.913655Z","response":" Kubernetes","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:11.940196Z","response":" Platforms","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:11.967307Z","response":" (","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:11.995662Z","response":"M","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:12.024042Z","response":"CP","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:12.05504Z","response":"s","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:12.088162Z","response":")","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:12.127829Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:12.173102Z","response":" direct","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:12.22729Z","response":" API","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:12.30325Z","response":" integration","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:12.410944Z","response":" both","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:12.494606Z","response":" offer","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:12.564776Z","response":" ways","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:12.631907Z","response":" to","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:12.704951Z","response":" manage","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:12.783056Z","response":" Kubernetes","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:12.859359Z","response":" clusters","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:12.959602Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:13.064887Z","response":" but","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:13.164883Z","response":" they","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:13.262122Z","response":" come","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:13.336308Z","response":" with","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:13.400667Z","response":" their","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:13.451076Z","response":" own","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:13.509773Z","response":" set","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:13.576473Z","response":" of","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:13.655354Z","response":" advantages","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:13.715718Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:13.77533Z","response":" disadvantages","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:13.841019Z","response":".\n\n","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:13.908759Z","response":"Adv","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:13.976858Z","response":"antages","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:14.041856Z","response":" of","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:14.102912Z","response":" Managed","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:14.166167Z","response":" Kubernetes","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:14.228981Z","response":" Platforms","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:14.292953Z","response":":\n\n","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:14.358745Z","response":"1","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:14.42106Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:14.485242Z","response":" Simpl","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:14.554767Z","response":"ified","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:14.616616Z","response":" Setup","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:14.676152Z","response":":","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:14.746318Z","response":" MCP","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:14.807946Z","response":" providers","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:14.874202Z","response":" typically","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:14.937087Z","response":" handle","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.002281Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.066834Z","response":" setup","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.127889Z","response":" of","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.194089Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.259587Z","response":" Kubernetes","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.326844Z","response":" cluster","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.389411Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.455658Z","response":" including","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.521184Z","response":" provisioning","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.588221Z","response":" resources","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.65295Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.717821Z","response":" configuring","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.78481Z","response":" networking","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.847956Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.912284Z","response":" security","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:15.975535Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:16.040118Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:16.104859Z","response":" other","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:16.168092Z","response":" critical","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:16.231368Z","response":" components","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:16.296457Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:16.361582Z","response":" This","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:16.426521Z","response":" can","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:16.492288Z","response":" save","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:16.555352Z","response":" time","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:16.620979Z","response":" for","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:16.684107Z","response":" developers","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:16.754933Z","response":" as","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:16.832152Z","response":" they","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:16.899631Z","response":" do","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:16.964509Z","response":" not","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:17.027384Z","response":" need","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:17.091351Z","response":" to","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:17.159851Z","response":" manage","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:17.223286Z","response":" these","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:17.289498Z","response":" aspects","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:17.356354Z","response":" themselves","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:17.423193Z","response":".\n","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:17.486662Z","response":"2","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:17.551971Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:17.61575Z","response":" Increased","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:17.688207Z","response":" Security","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:17.757318Z","response":":","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:17.821758Z","response":" MCP","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:17.887268Z","response":"s","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:17.948333Z","response":" often","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:18.008232Z","response":" provide","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:18.077812Z","response":" additional","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:18.147013Z","response":" layers","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:18.217277Z","response":" of","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:18.283897Z","response":" security","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:18.350478Z","response":" by","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:18.415704Z","response":" implementing","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:18.481289Z","response":" features","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:18.548028Z","response":" like","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:18.611099Z","response":" role","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:18.678761Z","response":"-based","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:18.744358Z","response":" access","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:18.810563Z","response":" control","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:18.878041Z","response":" (","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:18.946228Z","response":"RB","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:19.014302Z","response":"AC","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:19.097881Z","response":"),","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:19.170644Z","response":" network","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:19.238137Z","response":" policies","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:19.30024Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:19.364581Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:19.434634Z","response":" encryption","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:19.500709Z","response":" at","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:19.56895Z","response":" rest","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:19.639255Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:19.727226Z","response":" This","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:19.804643Z","response":" ensures","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:19.87102Z","response":" that","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:19.941261Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:20.010917Z","response":" cluster","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:20.094064Z","response":" is","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:20.169036Z","response":" secure","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:20.238579Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:20.302623Z","response":" protected","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:20.369048Z","response":" from","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:20.434172Z","response":" unauthorized","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:20.499142Z","response":" access","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:20.56621Z","response":" or","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:20.634116Z","response":" data","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:20.699872Z","response":" breaches","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:20.763544Z","response":".\n","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:20.829405Z","response":"3","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:20.89575Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:20.965708Z","response":" Cons","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:21.025934Z","response":"istency","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:21.097321Z","response":":","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:21.166675Z","response":" Using","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:21.232411Z","response":" an","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:21.33322Z","response":" MCP","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:21.411888Z","response":" can","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:21.481707Z","response":" ensure","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:21.55555Z","response":" consistency","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:21.634802Z","response":" in","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:21.708313Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:21.784843Z","response":" deployment","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:21.869614Z","response":" of","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:22.012237Z","response":" applications","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:22.110631Z","response":" across","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:22.216535Z","response":" different","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:22.329813Z","response":" environments","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:22.475237Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:22.569548Z","response":" as","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:22.649182Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:22.749762Z","response":" platform","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:22.844884Z","response":" handles","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:22.949237Z","response":" configuration","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:23.101354Z","response":" management","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:23.187479Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:23.251064Z","response":" updates","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:23.306885Z","response":" for","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:23.363117Z","response":" you","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:23.428985Z","response":".\n","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:23.543077Z","response":"4","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:23.639968Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:23.726483Z","response":" Cost","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:23.841912Z","response":"-","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:23.968895Z","response":"Effective","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:24.068313Z","response":":","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:24.190457Z","response":" By","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:24.315552Z","response":" leveraging","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:24.43171Z","response":" pre","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:24.500557Z","response":"-built","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:24.573903Z","response":" infrastructure","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:24.670676Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:24.744153Z","response":" MCP","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:24.81261Z","response":" providers","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:24.893021Z","response":" can","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:24.96608Z","response":" offer","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:25.102749Z","response":" a","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:25.239893Z","response":" more","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:25.309684Z","response":" cost","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:25.377889Z","response":"-effective","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:25.433867Z","response":" option","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:25.501348Z","response":" compared","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:25.568154Z","response":" to","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:25.632687Z","response":" deploying","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:25.70052Z","response":" Kubernetes","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:25.784646Z","response":" on","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:25.858342Z","response":" your","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:25.920512Z","response":" own","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:25.976126Z","response":" infrastructure","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:26.033174Z","response":".\n\n","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:26.098993Z","response":"Dis","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:26.167948Z","response":"adv","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:26.232791Z","response":"antages","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:26.29773Z","response":" of","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:26.359918Z","response":" Managed","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:26.423847Z","response":" Kubernetes","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:26.497138Z","response":" Platforms","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:26.58282Z","response":":\n\n","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:26.676701Z","response":"1","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:26.763009Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:26.834882Z","response":" Dependency","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:26.90525Z","response":" on","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:26.974648Z","response":" Third","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:27.045182Z","response":"-","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:27.115002Z","response":"Party","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:27.189654Z","response":" Provider","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:27.261974Z","response":":","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:27.339679Z","response":" Your","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:27.431873Z","response":" application","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:27.513082Z","response":"'s","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:27.584381Z","response":" reliability","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:27.661842Z","response":" depends","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:27.743566Z","response":" on","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:27.817941Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:27.91516Z","response":" performance","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:28.015319Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:28.089493Z","response":" stability","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:28.1749Z","response":" of","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:28.259252Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:28.329361Z","response":" managed","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:28.400172Z","response":" Kubernetes","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:28.49176Z","response":" platform","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:28.570213Z","response":" provider","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:28.645652Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:28.728346Z","response":" If","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:28.796479Z","response":" this","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:28.859823Z","response":" service","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:28.951385Z","response":" is","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:29.0727Z","response":" unavailable","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:29.168802Z","response":" or","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:29.268586Z","response":" experiences","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:29.389712Z","response":" downtime","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:29.494915Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:29.628868Z","response":" it","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:29.729354Z","response":" could","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:29.86476Z","response":" impact","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:30.009213Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:30.079001Z","response":" availability","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:30.158789Z","response":" of","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:30.293447Z","response":" your","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:30.417991Z","response":" applications","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:30.551033Z","response":".\n","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:30.675652Z","response":"2","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:30.80667Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:30.924866Z","response":" Limited","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:31.046358Z","response":" Custom","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:31.173877Z","response":"ization","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:31.315255Z","response":":","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:31.418861Z","response":" While","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:31.535777Z","response":" MCP","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:31.658936Z","response":"s","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:31.790417Z","response":" offer","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:31.915641Z","response":" many","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:32.048008Z","response":" features","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:32.142242Z","response":" out","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:32.246084Z","response":"-of","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:32.374446Z","response":"-the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:32.501005Z","response":"-box","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:32.623911Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:32.733369Z","response":" they","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:32.857669Z","response":" may","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:32.980805Z","response":" not","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:33.100961Z","response":" provide","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:33.221088Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:33.317855Z","response":" same","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:33.433735Z","response":" level","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:33.531582Z","response":" of","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:33.643459Z","response":" customization","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:33.760871Z","response":" as","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:33.885576Z","response":" deploying","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:34.012422Z","response":" Kubernetes","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:34.125234Z","response":" directly","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:34.245459Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:34.367692Z","response":" This","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:34.495821Z","response":" can","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:34.598972Z","response":" be","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:34.699961Z","response":" a","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:34.83265Z","response":" disadvantage","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:34.951179Z","response":" if","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:35.054123Z","response":" you","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:35.159144Z","response":" require","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:35.30026Z","response":" specific","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:35.409584Z","response":" configurations","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:35.524542Z","response":" or","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:35.667895Z","response":" integr","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:35.812726Z","response":"ations","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:35.934633Z","response":" that","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:36.039491Z","response":" are","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:36.133165Z","response":" not","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:36.218325Z","response":" supported","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:36.34589Z","response":" by","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:36.474636Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:36.585932Z","response":" platform","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:36.68976Z","response":".\n\n","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:36.819052Z","response":"Adv","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:36.922432Z","response":"antages","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:37.008464Z","response":" of","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:37.098497Z","response":" Direct","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:37.215663Z","response":" API","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:37.339713Z","response":" Integration","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:37.447441Z","response":":\n\n","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:37.534139Z","response":"1","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:37.63007Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:37.766828Z","response":" Full","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:37.872926Z","response":" Control","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:37.966049Z","response":":","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:38.04937Z","response":" With","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:38.136245Z","response":" direct","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:38.21775Z","response":" API","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:38.350267Z","response":" integration","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:38.468419Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:38.553737Z","response":" developers","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:38.6499Z","response":" have","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:38.734916Z","response":" full","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:38.819278Z","response":" control","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:38.92445Z","response":" over","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:39.052559Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:39.16954Z","response":" configuration","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:39.265443Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:39.372347Z","response":" operations","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:39.499061Z","response":" of","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:39.61076Z","response":" their","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:39.699161Z","response":" Kubernetes","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:39.775738Z","response":" clusters","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:39.866931Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:39.951302Z","response":" They","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:40.085294Z","response":" can","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:40.212831Z","response":" tailor","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:40.306588Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:40.39025Z","response":" cluster","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:40.485819Z","response":" to","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:40.630654Z","response":" meet","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:40.729878Z","response":" specific","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:40.818932Z","response":" requirements","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:40.918474Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:41.042957Z","response":" implement","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:41.138437Z","response":" custom","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:41.230675Z","response":" features","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:41.318827Z","response":".\n","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:41.394015Z","response":"2","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:41.5018Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:41.640032Z","response":" Cost","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:41.746086Z","response":"-","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:41.837775Z","response":"Effect","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:41.956275Z","response":"iveness","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:42.06862Z","response":":","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:42.155929Z","response":" Developers","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:42.273741Z","response":" have","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:42.397827Z","response":" more","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:42.488843Z","response":" freedom","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:42.56906Z","response":" to","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:42.654196Z","response":" choose","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:42.740136Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:42.832239Z","response":" tools","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:42.975937Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:43.101572Z","response":" technologies","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:43.194644Z","response":" they","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:43.286071Z","response":" need","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:43.369864Z","response":" for","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:43.458135Z","response":" their","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:43.548447Z","response":" applications","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:43.635956Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:43.745614Z","response":" which","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:43.855056Z","response":" can","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:43.936437Z","response":" lead","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:44.021113Z","response":" to","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:44.108986Z","response":" cost","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:44.179912Z","response":" savings","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:44.269362Z","response":" as","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:44.345776Z","response":" they","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:44.43404Z","response":" may","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:44.520119Z","response":" not","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:44.611475Z","response":" need","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:44.73266Z","response":" to","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:44.851049Z","response":" rely","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:44.929598Z","response":" on","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:44.999601Z","response":" third","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:45.109366Z","response":"-party","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:45.191845Z","response":" services","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:45.279127Z","response":" or","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:45.359377Z","response":" pay","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:45.45771Z","response":" additional","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:45.542555Z","response":" fees","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:45.655877Z","response":" for","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:45.728931Z","response":" additional","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:45.793924Z","response":" features","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:45.860038Z","response":".\n\n","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:45.931281Z","response":"Dis","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:45.994847Z","response":"adv","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:46.05908Z","response":"antages","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:46.124922Z","response":" of","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:46.187499Z","response":" Direct","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:46.251393Z","response":" API","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:46.319875Z","response":" Integration","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:46.424064Z","response":":\n\n","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:46.51175Z","response":"1","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:46.585061Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:46.648605Z","response":" Complexity","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:46.716114Z","response":":","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:46.790752Z","response":" Deploy","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:46.866031Z","response":"ing","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:46.929336Z","response":" Kubernetes","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:47.003172Z","response":" requires","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:47.070416Z","response":" a","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:47.146037Z","response":" significant","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:47.2588Z","response":" amount","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:47.333322Z","response":" of","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:47.410824Z","response":" knowledge","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:47.485808Z","response":" about","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:47.576558Z","response":" container","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:47.664996Z","response":" orchest","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:47.753157Z","response":"ration","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:47.852514Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:47.934287Z","response":" cluster","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:48.017382Z","response":" management","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:48.130248Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:48.207267Z","response":" This","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:48.297338Z","response":" complexity","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:48.385938Z","response":" can","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:48.466254Z","response":" make","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:48.545366Z","response":" it","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:48.615574Z","response":" challenging","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:48.718021Z","response":" for","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:48.86922Z","response":" developers","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:48.959431Z","response":" who","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:49.035647Z","response":" are","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:49.104896Z","response":" new","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:49.172349Z","response":" to","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:49.239733Z","response":" Kubernetes","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:49.33225Z","response":".\n","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:49.400363Z","response":"2","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:49.472637Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:49.554353Z","response":" Increased","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:49.632925Z","response":" Maintenance","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:49.69818Z","response":":","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:49.781923Z","response":" Running","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:49.868302Z","response":" a","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:49.962932Z","response":" Kubernetes","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:50.040324Z","response":" cluster","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:50.107175Z","response":" directly","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:50.173533Z","response":" requires","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:50.250071Z","response":" constant","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:50.312946Z","response":" monitoring","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:50.374585Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:50.436102Z","response":" maintenance","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:50.512201Z","response":" to","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:50.590006Z","response":" ensure","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:50.658636Z","response":" that","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:50.733153Z","response":" everything","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:50.805059Z","response":" is","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:50.872363Z","response":" running","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:50.935547Z","response":" smoothly","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:50.996648Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:51.068245Z","response":" Developers","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:51.140189Z","response":" need","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:51.212468Z","response":" to","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:51.299487Z","response":" have","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:51.372133Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:51.437228Z","response":" skills","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:51.501267Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:51.561503Z","response":" resources","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:51.619618Z","response":" to","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:51.68467Z","response":" handle","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:51.765053Z","response":" potential","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:51.840111Z","response":" issues","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:51.920042Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:51.994147Z","response":" such","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:52.056657Z","response":" as","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:52.133041Z","response":" out","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:52.19869Z","response":"ages","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:52.26424Z","response":" or","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:52.327274Z","response":" configuration","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:52.396183Z","response":" errors","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:52.462893Z","response":".\n\n","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:52.524011Z","response":"In","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:52.585021Z","response":" conclusion","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:52.6644Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:52.744719Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:52.825802Z","response":" choice","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:52.902166Z","response":" between","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:52.983947Z","response":" an","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:53.07978Z","response":" MCP","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:53.149404Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:53.2103Z","response":" direct","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:53.274329Z","response":" API","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:53.338193Z","response":" integration","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:53.406553Z","response":" depends","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:53.472164Z","response":" on","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:53.54659Z","response":" your","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:53.612038Z","response":" specific","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:53.685386Z","response":" needs","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:53.75272Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:53.869406Z","response":" goals","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:53.958214Z","response":" for","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:54.03515Z","response":" managing","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:54.099345Z","response":" your","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:54.198445Z","response":" Kubernetes","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:54.28183Z","response":" clusters","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:54.344597Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:54.420047Z","response":" If","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:54.507261Z","response":" you","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:54.578072Z","response":" want","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:54.654759Z","response":" a","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:54.738201Z","response":" simplified","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:54.814472Z","response":" setup","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:54.878492Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:54.947085Z","response":" increased","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:55.060468Z","response":" security","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:55.135454Z","response":" with","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:55.240182Z","response":" consistent","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:55.32281Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:55.405792Z","response":" cost","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:55.473793Z","response":"-effective","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:55.578659Z","response":" deployment","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:55.695015Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:55.785103Z","response":" an","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:55.84691Z","response":" MCP","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:55.922071Z","response":" may","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:56.008014Z","response":" be","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:56.092083Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:56.200391Z","response":" right","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:56.268629Z","response":" option","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:56.379482Z","response":" for","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:56.451416Z","response":" you","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:56.520046Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:56.616535Z","response":" However","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:56.703135Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:56.779665Z","response":" if","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:56.843462Z","response":" you","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:56.948075Z","response":" require","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:57.075504Z","response":" full","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:57.164827Z","response":" control","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:57.243784Z","response":" over","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:57.329896Z","response":" the","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:57.48038Z","response":" cluster","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:57.559223Z","response":"'s","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:57.64185Z","response":" configuration","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:57.722827Z","response":" and","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:57.801271Z","response":" operations","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:57.929452Z","response":" or","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:58.043124Z","response":" need","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:58.116895Z","response":" to","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:58.181954Z","response":" implement","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:58.251755Z","response":" custom","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:58.317309Z","response":" features","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:58.388705Z","response":",","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:58.48106Z","response":" direct","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:58.599402Z","response":" API","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:58.729672Z","response":" integration","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:58.848749Z","response":" may","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:58.946871Z","response":" be","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:59.0589Z","response":" more","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:59.149525Z","response":" suitable","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:59.249385Z","response":".","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T03:52:59.340934Z","response":"","done":true,"done_reason":"stop","context":[151644,8948,198,2610,525,1207,16948,11,3465,553,54364,14817,13,1446,525,264,10950,17847,13,151645,198,151644,872,198,840,20772,279,22146,323,63625,315,79148,16293,19041,2118,5333,17590,13,151645,198,151644,77091,198,27192,66374,95109,320,44,7123,82,8,323,2118,5333,17590,2176,3010,5510,311,10091,66374,26968,11,714,807,2525,448,862,1828,738,315,22146,323,63625,382,23453,37786,315,60744,66374,95109,1447,16,13,61242,1870,18626,25,79148,12565,11136,3705,279,6505,315,279,66374,10652,11,2670,97056,4963,11,71783,28030,11,4763,11,323,1008,9023,6813,13,1096,646,3581,882,369,13402,438,807,653,537,1184,311,10091,1493,13566,5577,624,17,13,61597,8234,25,79148,82,3545,3410,5107,13617,315,4763,553,24931,4419,1075,3476,5980,2615,2524,320,29259,1706,701,3922,10186,11,323,25463,518,2732,13,1096,25351,429,279,10652,374,9767,323,2617,504,44471,2615,476,821,68040,624,18,13,7292,47094,25,12091,458,79148,646,5978,28137,304,279,23172,315,8357,3941,2155,21737,11,438,279,5339,13469,6546,6240,323,8837,369,498,624,19,13,11194,12,67539,25,3216,76482,855,51614,13737,11,79148,12565,646,3010,264,803,2783,52321,2999,7707,311,60317,66374,389,697,1828,13737,382,4839,14290,37786,315,60744,66374,95109,1447,16,13,32977,389,20861,12,37361,22916,25,4615,3766,594,30538,13798,389,279,5068,323,19753,315,279,8975,66374,5339,9109,13,1416,419,2473,374,34987,476,11449,74854,11,432,1410,5421,279,18048,315,697,8357,624,17,13,18905,8406,2022,25,5976,79148,82,3010,1657,4419,700,8668,10603,12625,11,807,1231,537,3410,279,1852,2188,315,48041,438,60317,66374,5961,13,1096,646,387,264,48736,421,498,1373,3151,32383,476,8761,804,429,525,537,7248,553,279,5339,382,23453,37786,315,7139,5333,40069,1447,16,13,8627,7779,25,3085,2118,5333,17590,11,13402,614,2480,2524,916,279,6546,323,7525,315,862,66374,26968,13,2379,646,50956,279,10652,311,3367,3151,8502,323,4211,2526,4419,624,17,13,11194,12,7738,12781,25,46617,614,803,11290,311,5157,279,7375,323,14310,807,1184,369,862,8357,11,892,646,2990,311,2783,18986,438,807,1231,537,1184,311,17188,389,4843,24031,3516,476,2291,5107,12436,369,5107,4419,382,4839,14290,37786,315,7139,5333,40069,1447,16,13,70618,25,70595,287,66374,7460,264,5089,3311,315,6540,911,5476,69884,2165,323,10652,6240,13,1096,23094,646,1281,432,17003,369,13402,879,525,501,311,66374,624,17,13,61597,38206,25,28025,264,66374,10652,5961,7460,6783,16558,323,13404,311,5978,429,4297,374,4303,38411,13,46617,1184,311,614,279,7361,323,4963,311,3705,4650,4714,11,1741,438,700,1134,476,6546,5975,382,641,16688,11,279,5754,1948,458,79148,323,2118,5333,17590,13798,389,697,3151,3880,323,8845,369,18150,697,66374,26968,13,1416,498,1366,264,43799,6505,323,7172,4763,448,12966,323,2783,52321,23172,11,458,79148,1231,387,279,1290,2999,369,498,13,4354,11,421,498,1373,2480,2524,916,279,10652,594,6546,323,7525,476,1184,311,4211,2526,4419,11,2118,5333,17590,1231,387,803,14452,13],"total_duration":47704487375,"load_duration":197070709,"prompt_eval_count":43,"prompt_eval_duration":49685000,"eval_count":562,"eval_duration":47453588000}

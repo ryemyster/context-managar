@@ -16,6 +16,7 @@ Keep output concise — Claude reads this to orient, then verifies source.
 from datetime import datetime, timezone
 from pathlib import Path
 from . import config
+from .inference import inference
 
 
 def ts() -> str:
@@ -62,7 +63,7 @@ def write_scan(
 ) -> str:
     slug = path.replace("/", "-").strip("-") or "root"
     content = f"""# Scan: `{path or "/"}`
-_Generated: {ts()} — Model: {config.OLLAMA_MODEL}_
+_Generated: {ts()} — Model: {inference.settings.fast_model}_
 
 ## Summary
 {summary}
@@ -191,7 +192,7 @@ def write_summary(
 ) -> str:
     slug = file.replace("/", "-").replace(".", "-")[:50]
     content = f"""# File Summary: `{file}`
-_Generated: {ts()} — Model: {config.OLLAMA_MODEL}_
+_Generated: {ts()} — Model: {inference.settings.fast_model}_
 
 ## Purpose
 {purpose}
@@ -219,15 +220,58 @@ def write_context(
     risks: list[str],
     suggested_files: list[str],
     vector_hits: list[dict],
+    audit_table: list[dict] | None = None,
+    warnings: list[str] | None = None,
+    dropped_candidates: list[dict] | None = None,
 ) -> str:
     vh_lines = "\n".join(
         f"- `{h['path']}` (similarity: {h.get('similarity', 0):.2f})"
         for h in vector_hits[:8]
     ) or "_no vector hits_"
+    audit_rows = audit_table or []
+    audit_lines = "\n".join(
+        "| {issue} | {status} | {evidence} | {missing} | {recommendation} |".format(
+            issue=row.get("issue", ""),
+            status=row.get("status", ""),
+            evidence=", ".join(f"`{p}`" for p in row.get("evidence_files", [])[:5]) or "_none_",
+            missing=", ".join(row.get("missing_evidence", [])[:5]) or "_none_",
+            recommendation=row.get("recommendation", ""),
+        )
+        for row in audit_rows
+        if isinstance(row, dict)
+    )
+    audit_section = ""
+    if audit_rows:
+        audit_section = f"""
+## Issue Audit
+| Issue | Status | Evidence Files | Missing Evidence | Recommendation |
+|---|---|---|---|---|
+{audit_lines}
+"""
+
+    warning_section = ""
+    if warnings:
+        warning_section = f"""
+## Warnings
+{_list(warnings)}
+"""
+
+    dropped_section = ""
+    dropped = dropped_candidates or []
+    if dropped:
+        dropped_lines = [
+            f"`{item.get('path', '')}` — {item.get('reason', '')}"
+            for item in dropped[:20]
+            if isinstance(item, dict)
+        ]
+        dropped_section = f"""
+## Dropped Candidates
+{_list(dropped_lines)}
+"""
 
     content = f"""# Context Bundle
 _Task: {task}_
-_Generated: {ts()} — Model: {config.OLLAMA_MODEL}_
+_Generated: {ts()} — Model: {inference.settings.fast_model}_
 
 ## Summary
 {summary}
@@ -237,6 +281,9 @@ _Generated: {ts()} — Model: {config.OLLAMA_MODEL}_
 
 ## Vector Search Hits
 {vh_lines}
+{audit_section}
+{warning_section}
+{dropped_section}
 
 ## Risks
 {_list(risks)}
@@ -260,20 +307,37 @@ def write_diff(
     risks: list[str],
     files_touched: list[str],
     test_recs: list[str],
+    diff_manifest: dict | None = None,
+    risk_findings: list[dict] | None = None,
 ) -> str:
     from hashlib import md5
     slug = md5(summary[:100].encode()).hexdigest()[:8]
+    manifest = diff_manifest or {"file_count": len(files_touched)}
+    classified = risk_findings or []
+    risk_bucket_lines = [
+        f"{item.get('category', 'unknown')}: {item.get('description', '')}"
+        for item in classified
+    ]
     content = f"""# Diff Summary
-_Generated: {ts()} — Model: {config.OLLAMA_MODEL}_
+_Generated: {ts()} — Model: {inference.settings.reasoning_model}_
 
 ## Summary
 {summary}
 
-## Files Touched ({len(files_touched)})
+## Deterministic Diff Manifest
+- Files touched: {manifest.get("file_count", len(files_touched))}
+- Source files: {manifest.get("source_file_count", 0)}
+- Test files: {manifest.get("test_file_count", 0)}
+- Truncated for model: {manifest.get("truncated_for_model", False)}
+
+## Files Touched ({manifest.get("file_count", len(files_touched))})
 {_list(files_touched)}
 
 ## Risks
 {_list(risks)}
+
+## Risk Classification
+{_list(risk_bucket_lines)}
 
 ## Test Recommendations
 {_list(test_recs)}
@@ -310,7 +374,7 @@ def write_draft(file: str, task: str, mode: str, code: str) -> str:
     ext  = Path(file).suffix or ".txt"
     content = f"""# Draft: `{file}`
 _Task: {task}_
-_Generated: {ts()} — Mode: {mode} — Model: {config.OLLAMA_MODEL}_
+_Generated: {ts()} — Mode: {mode} — Model: {inference.settings.fast_model}_
 
 ## Generated Code
 ```{ext.lstrip(".")}
@@ -331,7 +395,7 @@ def write_scaffold_file(file: str, task: str, spec: str, mode: str, code: str) -
     content = f"""# Scaffold: `{file}`
 _Task: {task}_
 _Spec: {spec}_
-_Generated: {ts()} — Mode: {mode} — Model: {config.OLLAMA_MODEL}_
+_Generated: {ts()} — Mode: {mode} — Model: {inference.settings.fast_model}_
 
 ## Generated Code
 ```{ext.lstrip(".")}
@@ -342,6 +406,49 @@ _Generated: {ts()} — Mode: {mode} — Model: {config.OLLAMA_MODEL}_
 **Claude: review before applying. Check types, imports, edge cases. You own the write.**
 """
     return write(f"scaffold-{slug}.md", content)
+
+
+def write_agent_run(
+    task: str,
+    final_answer: str,
+    tool_calls_made: list[dict],
+    iterations: int,
+    stopped_reason: str,
+    warnings: list[str],
+) -> str:
+    import re
+    slug = re.sub(r"[^a-z0-9]+", "-", task.lower())[:40].strip("-")
+    tool_rows = "\n".join(
+        "| `{name}` | `{args}` | {result} |".format(
+            name=tc.get("name", ""),
+            args=str(tc.get("arguments", {}))[:60],
+            result=str(tc.get("result", ""))[:80],
+        )
+        for tc in tool_calls_made
+    ) or "_no tool calls_"
+
+    warning_section = f"\n## Warnings\n{_list(warnings)}\n" if warnings else ""
+
+    content = f"""# Agent Run
+_Task: {task}_
+_Generated: {ts()} — Model: {inference.settings.agent_model}_
+
+## Final Answer
+{final_answer or "_no answer returned_"}
+
+## Tool Calls ({len(tool_calls_made)})
+| Tool | Arguments | Result (truncated) |
+|------|-----------|-------------------|
+{tool_rows}
+
+## Stats
+- Iterations: {iterations}
+- Stopped: {stopped_reason}
+{warning_section}
+---
+**Calling agent: verify source files before acting on this output. The junior read the files; you own the decisions.**
+"""
+    return write(f"agent-{slug}.md", content)
 
 
 def write_index_report(paths: list[str], indexed: int, skipped: int, errors: int) -> str:

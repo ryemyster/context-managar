@@ -1,0 +1,2 @@
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T02:59:00.869487Z","response":"OK","done":false}
+{"model":"qwen2.5-coder:3b","created_at":"2026-06-17T02:59:00.908671Z","response":"","done":true,"done_reason":"stop","context":[151644,8948,198,2610,525,1207,16948,11,3465,553,54364,14817,13,1446,525,264,10950,17847,13,151645,198,151644,872,198,20841,1172,448,279,3409,10402,13,151645,198,151644,77091,198,3925],"total_duration":291098375,"load_duration":204981167,"prompt_eval_count":36,"prompt_eval_duration":44839000,"eval_count":2,"eval_duration":39015000}

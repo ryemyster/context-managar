@@ -2,35 +2,148 @@
 models.py — Pydantic request/response models for all endpoints.
 """
 
-from typing import Optional
-from pydantic import BaseModel
+from pathlib import Path
+from typing import Literal, Optional
+from pydantic import BaseModel, field_validator
+from . import config
+
+
+DetailLevel = Literal["summary", "standard", "full"]
+ResponseMode = Literal["context_safe"]
+
+
+_BARE_SOURCE_ROOTS = {
+    "app",
+    "components",
+    "context-engine",
+    "lib",
+    "pages",
+    "src",
+    "tests",
+}
+
+
+def _is_scoped_repo_path(path: str) -> bool:
+    if not path or path in {".", "/"}:
+        return False
+    raw = path.strip()
+    if raw.startswith("/"):
+        try:
+            resolved = Path(raw).expanduser().resolve()
+            repo_root = config.REPO_ROOT.resolve()
+        except Exception:
+            return False
+        if not resolved.is_relative_to(repo_root):
+            return False
+        return resolved != repo_root
+    parts = [part for part in raw.strip("/").split("/") if part and part != "."]
+    if len(parts) < 2 or ".." in parts:
+        return False
+    if parts[0] in _BARE_SOURCE_ROOTS:
+        return False
+    return True
+
+
+def _validate_scoped_repo_path(path: str, field_name: str) -> str:
+    if not _is_scoped_repo_path(path):
+        raise ValueError(
+            f"{field_name} must include the owner/repo prefix relative to REPO_ROOT "
+            "(for example 'owner/repo/src')"
+        )
+    return path
+
+
+class DiscoveryOptions(BaseModel):
+    detail: DetailLevel = "summary"
+    mode: Optional[ResponseMode] = None
+    limit: Optional[int] = None
+    max_chars: Optional[int] = None
+    max_results: Optional[int] = None
 
 
 # ── Requests ───────────────────────────────────────────────────────────────────
 
-class ScanRequest(BaseModel):
+class ScanRequest(DiscoveryOptions):
     path: str = ""
 
-class FindRequest(BaseModel):
+    @field_validator("path")
+    @classmethod
+    def path_must_be_scoped(cls, v: str) -> str:
+        return _validate_scoped_repo_path(v, "path")
+
+class FindRequest(DiscoveryOptions):
     query: str
     path: str = "."
 
-class DependenciesRequest(BaseModel):
+    @field_validator("path")
+    @classmethod
+    def path_must_be_scoped_or_default(cls, v: str) -> str:
+        if v == ".":
+            return v
+        return _validate_scoped_repo_path(v, "path")
+
+class DependenciesRequest(DiscoveryOptions):
     path: str = "."
+
+    @field_validator("path")
+    @classmethod
+    def path_must_be_scoped_or_default(cls, v: str) -> str:
+        if v == ".":
+            return v
+        return _validate_scoped_repo_path(v, "path")
+
+class RoutesRequest(DiscoveryOptions):
+    path: str = "."
+
+    @field_validator("path")
+    @classmethod
+    def path_must_be_scoped_or_default(cls, v: str) -> str:
+        if v == ".":
+            return v
+        return _validate_scoped_repo_path(v, "path")
+
+class ReadRequest(BaseModel):
+    path: str
+    max_chars: Optional[int] = None
+
+    @field_validator("path")
+    @classmethod
+    def path_must_be_scoped(cls, v: str) -> str:
+        return _validate_scoped_repo_path(v, "path")
 
 class SummarizeRequest(BaseModel):
     file: str
 
+    @field_validator("file")
+    @classmethod
+    def file_must_be_scoped(cls, v: str) -> str:
+        return _validate_scoped_repo_path(v, "file")
+
 class ContextRequest(BaseModel):
     task: str
-    paths: list[str] = ["."]
+    paths: list[str] = []
     focus: list[str] = []
     use_vector: bool = False   # opt-in — adds embed+model swap latency; only useful after /index
+
+    @field_validator("paths")
+    @classmethod
+    def paths_must_be_scoped(cls, v: list[str]) -> list[str]:
+        for p in v:
+            _validate_scoped_repo_path(p, f"path {p!r}")
+        return v
 
 class DiffRequest(BaseModel):
     diff: str
 
-class VectorSearchRequest(BaseModel):
+class IssueAuditRequest(BaseModel):
+    task: str
+    repo: str
+    paths: list[str]
+    focus: list[str] = []
+    requirements: list[str] = []
+    use_vector: bool = False
+
+class VectorSearchRequest(DiscoveryOptions):
     query: str
     limit: int = 8
     threshold: float = 0.3   # cosine similarity floor; prose/markdown typically 0.2-0.5, code 0.5-0.8
@@ -39,107 +152,93 @@ class IndexRequest(BaseModel):
     paths: list[str] = ["."]
     force: bool = False
 
+
+NoteScope = Literal["repo", "project", "session", "global"]
+
+
+class StoreContextNoteRequest(BaseModel):
+    title: str
+    content: str
+    source: str
+    tags: list[str] = []
+    repo: str
+    scope: NoteScope
+
+    @field_validator("title", "content", "source", "repo")
+    @classmethod
+    def fields_must_not_be_blank(cls, v: str) -> str:
+        value = v.strip()
+        if not value:
+            raise ValueError("field must not be blank")
+        return value
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, v: list[str]) -> list[str]:
+        tags: list[str] = []
+        seen: set[str] = set()
+        for tag in v:
+            normalized = tag.strip()
+            if not normalized:
+                continue
+            key = normalized.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            tags.append(normalized)
+        return tags
+
 class DraftRequest(BaseModel):
     task: str                           # what to implement — be specific
     file: str                           # target file path (relative to REPO_ROOT)
     context_files: list[str] = []       # additional files to read for context
     mode: str = "edit"                  # "create" | "edit"
 
+    @field_validator("file")
+    @classmethod
+    def file_must_be_scoped(cls, v: str) -> str:
+        return _validate_scoped_repo_path(v, "file")
+
+    @field_validator("context_files")
+    @classmethod
+    def context_files_must_be_scoped(cls, v: list[str]) -> list[str]:
+        for path in v:
+            _validate_scoped_repo_path(path, f"context file {path!r}")
+        return v
+
 class ScaffoldFile(BaseModel):
     file: str                           # target file path (relative to REPO_ROOT)
     spec: str                           # what this specific file should do
     mode: str = "create"                # "create" | "edit"
+
+    @field_validator("file")
+    @classmethod
+    def file_must_be_scoped(cls, v: str) -> str:
+        return _validate_scoped_repo_path(v, "file")
 
 class ScaffoldRequest(BaseModel):
     task: str                           # overall feature or task description
     files: list[ScaffoldFile]           # ordered list of files to generate
     context_files: list[str] = []       # shared reference files for all generations
 
+    @field_validator("context_files")
+    @classmethod
+    def context_files_must_be_scoped(cls, v: list[str]) -> list[str]:
+        for path in v:
+            _validate_scoped_repo_path(path, f"context file {path!r}")
+        return v
+
 
 # ── Responses ──────────────────────────────────────────────────────────────────
 
-class HealthResponse(BaseModel):
-    model_config = {"protected_namespaces": ()}
-
+class IssueAuditResponse(BaseModel):
+    run_id: str
     status: str
-    ollama: bool
-    ollama_host: str
-    model: str
-    model_available: bool
-    embed_model: str
-    embed_model_available: bool
-    supabase: bool
-    vector_ready: bool
-    repo_mounted: bool
-    output_mounted: bool
-
-class ScanResponse(BaseModel):
-    path: str
-    files: list[str]
-    summary: str
-    patterns: list[str]
-    dependencies: list[str]
-    written_to: str
-
-class FindResponse(BaseModel):
-    query: str
-    path: str
-    matches: list[str]
-    files: list[str]
-    written_to: str
-
-class RoutesResponse(BaseModel):
-    routes: list[str]
-    api_routes: list[str]
-    server_actions: list[str]
-    middleware: list[str]
-    auth_paths: list[str]
-    written_to: str
-
-class DependenciesResponse(BaseModel):
-    path: str
-    internal: list[str]
-    external: list[str]
-    graph: dict[str, list[str]]
-    written_to: str
-
-class SummarizeResponse(BaseModel):
-    file: str
-    purpose: str
-    dependencies: list[str]
-    risks: list[str]
-    architectural_notes: list[str]
-    written_to: str
-
-class ContextResponse(BaseModel):
-    task: str
-    files: list[str]
-    summary: str
-    risks: list[str]
+    findings: list[dict]
+    evidence_matrix: list[dict] = []
     suggested_files: list[str]
-    vector_hits: list[str]
-    written_to: str
-
-class DiffResponse(BaseModel):
-    summary: str
-    risks: list[str]
-    files_touched: list[str]
-    test_recommendations: list[str]
-    written_to: str
-
-class VectorSearchResponse(BaseModel):
-    query: str
-    matches: list[dict]
-    written_to: str
-    available: bool
-
-class IndexResponse(BaseModel):
-    paths: list[str]
-    indexed: int
-    skipped: int
-    errors: int
-    available: bool
-    written_to: str
+    warnings: list[str]
+    artifacts: dict
 
 class DraftResponse(BaseModel):
     file: str
@@ -158,3 +257,47 @@ class ScaffoldResponse(BaseModel):
     files: list[ScaffoldFileResult]
     total: int
     errors: list[str]
+
+
+class ToolCallRequest(BaseModel):
+    name: str
+    arguments: dict = {}
+
+class AgentRunRequest(BaseModel):
+    task: str
+    tools: list[str] = []           # empty = all tools enabled
+    max_iterations: int = 10
+    system_prompt: Optional[str] = None
+    allowed_scopes: Optional[list[str]] = None   # None = all scopes permitted
+    required_paths: list[str] = []  # exact source files that must be read for a verified report
+
+    @field_validator("required_paths")
+    @classmethod
+    def required_paths_must_be_scoped(cls, v: list[str]) -> list[str]:
+        for path in v:
+            _validate_scoped_repo_path(path, f"required path {path!r}")
+        return list(dict.fromkeys(v))
+
+class LogLevelRequest(BaseModel):
+    level: str                         # TRACE | DEBUG | INFO | WARNING | ERROR
+
+class LogLevelResponse(BaseModel):
+    previous: str
+    current: str
+
+
+class AgentRunResponse(BaseModel):
+    run_id: str
+    status: str                      # "running" | "verified" | "partial" | "blocked" | "failed"
+    task: str
+    final_answer: str = ""
+    tool_calls_made: list[dict] = []
+    iterations: int = 0
+    stopped_reason: str = ""
+    warnings: list[str] = []
+    artifacts: dict = {}
+    memory_context_used: bool = False
+    memory_hits: int = 0
+    plan_state: dict = {}
+    verification: dict = {}
+    evidence_coverage: dict = {}

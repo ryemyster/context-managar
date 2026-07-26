@@ -10,7 +10,7 @@ from pathlib import Path
 from . import config
 from .repo_reader import walk_repo, read_file, rel_path, safe_resolve, build_snippet_block
 from .search_worker import extract_imports
-from . import ollama_client
+from .inference import inference
 from .logger import log
 
 
@@ -27,7 +27,7 @@ async def scan_directory(path: str = "") -> dict:
     Returns file list, summary, patterns, dependencies.
     """
     t0 = time.monotonic()
-    base = safe_resolve(path) if path else config.REPO_ROOT
+    base = safe_resolve(path)
     log.debug("scan start path=%s max_files=%d", base, config.MAX_FILES_PER_SCAN)
 
     files = walk_repo(base)
@@ -58,8 +58,8 @@ Code: {snippet_block}
 Respond with exactly this structure:
 {{"summary":"2-3 sentences on what this code does","patterns":["pattern1","pattern2"]}}"""
 
-    raw = await ollama_client.generate(prompt)
-    parsed = ollama_client.parse_json_response(raw)
+    raw = await inference.generate(prompt)
+    parsed = inference.parse_json_response(raw)
 
     summary  = parsed.get("summary",  raw[:300] if not parsed else "Could not parse model output")
     patterns = parsed.get("patterns", [])
