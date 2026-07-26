@@ -6,7 +6,7 @@ from pydantic import ValidationError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "context-engine"))
 
-from app.models import ContextRequest, FindRequest, ReadRequest, ScanRequest, StoreContextNoteRequest
+from app.models import AgentRunRequest, ContextRequest, FindRequest, ReadRequest, ScanRequest, StoreContextNoteRequest
 
 
 def test_context_request_requires_owner_repo_prefixed_paths():
@@ -41,6 +41,17 @@ def test_find_request_allows_default_root_but_rejects_bare_scope():
 def test_read_request_requires_owner_repo_prefixed_path():
     with pytest.raises(ValidationError, match="owner/repo prefix"):
         ReadRequest(path="app/api/route.ts")
+
+
+def test_agent_run_required_paths_are_scoped_and_deduplicated():
+    req = AgentRunRequest(
+        task="inspect auth",
+        required_paths=["owner/repo/app/auth.py", "owner/repo/app/auth.py"],
+    )
+    assert req.required_paths == ["owner/repo/app/auth.py"]
+
+    with pytest.raises(ValidationError, match="owner/repo prefix"):
+        AgentRunRequest(task="inspect auth", required_paths=["app/auth.py"])
 
 
 def test_store_context_note_request_normalizes_tags_and_requires_content():

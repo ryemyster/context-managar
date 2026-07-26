@@ -46,6 +46,7 @@ class AgentResult:
     memory_hits: int = 0
     plan_state: dict = field(default_factory=dict)
     verification: dict = field(default_factory=dict)
+    evidence_coverage: dict = field(default_factory=dict)
     unknown_tools: list[str] = field(default_factory=list)
 
 
@@ -153,6 +154,25 @@ def _partial_answer_from_evidence(max_iter: int, tool_calls_made: list[dict]) ->
         "repository evidence:\n"
         + "\n".join(evidence_lines)
     )
+
+
+def _evidence_coverage(required_paths: list[str], tool_calls_made: list[dict]) -> dict:
+    """Report whether a delegated investigation read every required source file."""
+    required = list(dict.fromkeys(path.strip("/") for path in required_paths if path.strip("/")))
+    inspected = {
+        str(call.get("arguments", {}).get("file", "")).strip("/")
+        for call in tool_calls_made
+        if call.get("name") == "read_file"
+        and str(call.get("result", "")).strip()
+        and not str(call.get("result", "")).lstrip().startswith("[")
+    }
+    missing = [path for path in required if path not in inspected]
+    return {
+        "required_paths": required,
+        "inspected_paths": sorted(inspected),
+        "missing_paths": missing,
+        "complete": not missing,
+    }
 
 
 def _tool_names(tool_defs: list[dict]) -> list[str]:
@@ -269,6 +289,7 @@ async def run_agent(
     max_iterations: int | None = None,
     model: str | None = None,
     allowed_scopes: list[str] | None = None,
+    required_paths: list[str] | None = None,
 ) -> AgentResult:
     """
     Run the agentic loop for a task.
@@ -316,6 +337,14 @@ async def run_agent(
         )
     tool_defs = tool_registry.get_tool_definitions(available_tools)
     system    = _build_system_prompt(tool_defs, system_prompt)
+    required_paths = required_paths or []
+    if required_paths:
+        system += (
+            " Required source files for this delegation: "
+            + ", ".join(required_paths)
+            + ". Read each file with read_file before providing a verified answer. "
+            "If a required file cannot be read, report the gap rather than infer its contents."
+        )
 
     messages: list[dict] = [
         {"role": "system", "content": system},
@@ -351,6 +380,13 @@ async def run_agent(
         messages, tool_defs, model, allowed_scopes, max_iter, t_start, budget
     )
 
+    evidence_coverage = _evidence_coverage(required_paths, tool_calls_made)
+    if stopped_reason == "final_answer" and not evidence_coverage["complete"]:
+        stopped_reason = "coverage_incomplete"
+        final_answer = _partial_answer_from_evidence(max_iter, tool_calls_made) or _inconclusive_answer(
+            max_iter, tool_calls_made
+        )
+
     verification: dict = {}
     if stopped_reason == "final_answer" and final_answer:
         verification = await _verify_answer(task, final_answer, tool_calls_made, plan_state)
@@ -379,6 +415,16 @@ async def run_agent(
 
             if not verification.get("passed"):
                 stopped_reason = "verification_failed"
+                final_answer = _partial_answer_from_evidence(max_iter, tool_calls_made) or _inconclusive_answer(
+                    max_iter, tool_calls_made
+                )
+        elif verification.get("passed") is not True:
+            # A verifier outage is not evidence that the answer is correct. Do not
+            # return a model-generated conclusion as a completed work product.
+            stopped_reason = "verification_unavailable"
+            final_answer = _partial_answer_from_evidence(max_iter, tool_calls_made) or _inconclusive_answer(
+                max_iter, tool_calls_made
+            )
 
     log.info("agent_runner done stopped=%s iterations=%d tool_calls=%d dur=%.1fs",
              stopped_reason, iterations_done, len(tool_calls_made), time.monotonic() - t_start)
@@ -393,6 +439,7 @@ async def run_agent(
         memory_hits=memory_hits,
         plan_state=plan_state,
         verification=verification,
+        evidence_coverage=evidence_coverage,
         unknown_tools=unknown_tools,
     )
 

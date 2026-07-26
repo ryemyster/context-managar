@@ -11,12 +11,51 @@ from . import config
 from .logger import log
 
 
+def normalize_repo_path(path: str) -> str:
+    """
+    Normalize caller-supplied paths to a canonical REPO_ROOT-relative path.
+
+    Accepted forms:
+    - src/file.py
+    - ./src/file.py
+    - repo-name/src/file.py when REPO_ROOT.name == repo-name
+    - owner/repo-name/src/file.py when REPO_ROOT ends in owner/repo-name
+    - absolute paths under REPO_ROOT
+    """
+    raw = str(path or "").strip()
+    if not raw:
+        return ""
+
+    repo_root = config.REPO_ROOT.resolve()
+    candidate = Path(raw).expanduser()
+    if candidate.is_absolute():
+        resolved = candidate.resolve()
+        if resolved == repo_root:
+            return "."
+        if resolved.is_relative_to(repo_root):
+            return str(resolved.relative_to(repo_root))
+        return raw
+
+    parts = [part for part in raw.replace("\\", "/").split("/") if part and part != "."]
+    if not parts:
+        return "."
+
+    root_parts = repo_root.parts
+    if len(parts) >= 2 and len(root_parts) >= 2 and tuple(parts[:2]) == tuple(root_parts[-2:]):
+        parts = parts[2:] or ["."]
+    elif parts and parts[0] == repo_root.name:
+        parts = parts[1:] or ["."]
+
+    return "/".join(parts)
+
+
 def safe_resolve(rel_path: str) -> Path:
     """
     Resolve a relative path under REPO_ROOT.
     Raises HTTP 400 if the path would escape REPO_ROOT (path traversal guard).
     """
-    p = (config.REPO_ROOT / rel_path.lstrip("/")).resolve()
+    normalized = normalize_repo_path(rel_path)
+    p = (config.REPO_ROOT / normalized).resolve()
     if not p.is_relative_to(config.REPO_ROOT.resolve()):
         raise HTTPException(
             status_code=400,

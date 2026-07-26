@@ -535,6 +535,8 @@ async def diff_summary(req: DiffRequest):
         risks=result["risks"],
         files_touched=result["files_touched"],
         test_recs=result["test_recommendations"],
+        diff_manifest=result.get("diff_manifest"),
+        risk_findings=result.get("risk_findings"),
     )
     artifact_ms = int((time.monotonic() - t_artifact) * 1000)
 
@@ -551,7 +553,9 @@ async def diff_summary(req: DiffRequest):
     return {
         "summary":              result["summary"],
         "risks":                result["risks"],
+        "risk_findings":        result.get("risk_findings", []),
         "files_touched":        result["files_touched"],
+        "diff_manifest":        result.get("diff_manifest", {}),
         "test_recommendations": result["test_recommendations"],
         "model_error":          result["model_error"],
         "timing_ms":            timing,

@@ -19,6 +19,7 @@ from app.agent_runner import (
     _build_repair_prompt,
     _build_system_prompt,
     _coerce_arguments,
+    _evidence_coverage,
     _looks_like_tool_intent_answer,
     _normalize_tool_arguments,
     _recover_text_tool_calls,
@@ -111,6 +112,28 @@ def test_tool_intent_answer_detection():
     assert not _looks_like_tool_intent_answer("AGENT_MAX_ITERATIONS is defined in app/config.py.")
 
 
+def test_evidence_coverage_requires_successful_exact_file_reads():
+    coverage = _evidence_coverage(
+        ["owner/repo/app/a.py", "owner/repo/app/b.py"],
+        [
+            {
+                "name": "read_file",
+                "arguments": {"file": "owner/repo/app/a.py"},
+                "result": "source contents",
+            },
+            {
+                "name": "read_file",
+                "arguments": {"file": "owner/repo/app/b.py"},
+                "result": "[not_found, retryable=False] missing",
+            },
+        ],
+    )
+
+    assert coverage["complete"] is False
+    assert coverage["inspected_paths"] == ["owner/repo/app/a.py"]
+    assert coverage["missing_paths"] == ["owner/repo/app/b.py"]
+
+
 # ── run_agent — stop conditions ────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -119,7 +142,9 @@ async def test_run_agent_stops_on_final_answer():
     mock_message = {"role": "assistant", "content": "The answer is 42.", "tool_calls": []}
 
     with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
-         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]):
+         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
+         patch("app.agent_runner._verify_answer", new_callable=AsyncMock,
+               return_value={"passed": True}):
         mock_chat.return_value = mock_message
 
         result = await run_agent("What is the answer?", max_iterations=5)
@@ -143,7 +168,9 @@ async def test_run_agent_calls_tool_and_continues():
     with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
-         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""):
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
+         patch("app.agent_runner._verify_answer", new_callable=AsyncMock,
+               return_value={"passed": True}):
         mock_chat.side_effect = [tool_call_msg, final_msg]
         mock_exec.return_value = ToolResult(ok=True, data="health: ok (HTTP 200)")
 
@@ -342,9 +369,11 @@ async def test_run_agent_memory_preflight_is_best_effort():
         return "late memory"
 
     with patch("app.agent_runner.config.OLLAMA_AGENT_MEMORY_TIMEOUT", 0.01), \
-         patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
-         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
-         patch("app.agent_runner._preflight_memory", side_effect=stalled_preflight):
+             patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+             patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
+             patch("app.agent_runner._preflight_memory", side_effect=stalled_preflight), \
+             patch("app.agent_runner._verify_answer", new_callable=AsyncMock,
+                   return_value={"passed": True}):
         mock_chat.return_value = final_msg
         result = await run_agent("Find route handlers", max_iterations=1)
 
@@ -588,7 +617,9 @@ async def test_run_agent_plan_state_captured_from_update_plan():
     with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
-         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""):
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
+         patch("app.agent_runner._verify_answer", new_callable=AsyncMock,
+               return_value={"passed": True}):
         mock_chat.side_effect = [update_plan_msg, final_msg]
         mock_exec.return_value = ToolResult(ok=True, data=plan_data)
 
@@ -625,7 +656,9 @@ async def test_run_agent_scope_denied_serialized_to_model():
     with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
          patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
          patch("app.agent_runner.tool_registry.execute_tool", new_callable=AsyncMock) as mock_exec, \
-         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""):
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
+         patch("app.agent_runner._verify_answer", new_callable=AsyncMock,
+               return_value={"passed": True}):
         mock_chat.side_effect = [tool_call_msg, final_msg]
         mock_exec.return_value = ToolResult(
             ok=False,
@@ -886,9 +919,27 @@ async def test_run_agent_verification_failed_when_repair_also_fails():
         result = await run_agent("Find routes", max_iterations=5)
 
     assert result.stopped_reason == "verification_failed"
-    assert result.final_answer == "Still bad."
+    assert result.final_answer.startswith("[agent completed 5 iterations")
     assert result.verification.get("passed") is False
     assert result.verification.get("repaired") is True
+
+
+@pytest.mark.asyncio
+async def test_run_agent_verifier_outage_returns_diagnostic_not_candidate_answer():
+    final_msg = {"role": "assistant", "content": "Invented conclusion.", "tool_calls": []}
+
+    with patch("app.agent_runner.inference.chat_with_tools", new_callable=AsyncMock) as mock_chat, \
+         patch("app.agent_runner.tool_registry.get_tool_definitions", return_value=[]), \
+         patch("app.agent_runner._preflight_memory", new_callable=AsyncMock, return_value=""), \
+         patch("app.agent_runner._verify_answer", new_callable=AsyncMock,
+               return_value={"passed": None, "error": "parse_failed"}):
+        mock_chat.return_value = final_msg
+
+        result = await run_agent("Find routes", max_iterations=1)
+
+    assert result.stopped_reason == "verification_unavailable"
+    assert "Invented conclusion." not in result.final_answer
+    assert result.final_answer.startswith("[agent completed 1 iterations")
 
 
 @pytest.mark.asyncio

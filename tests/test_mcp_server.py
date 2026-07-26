@@ -61,6 +61,7 @@ async def test_tools_list_has_primary_tools_first_and_advanced_tools_last():
     ]
     assert "PRIMARY DELEGATION TOOL" in tools[0]["description"]
     assert "Large outputs are written to artifacts" in tools[0]["description"]
+    assert "required_paths" in tools[0]["inputSchema"]["properties"]
     assert all(tool["inputSchema"]["additionalProperties"] is False for tool in tools)
     store_tool = next(tool for tool in tools if tool["name"] == "store_context_note")
     assert store_tool["annotations"]["readOnlyHint"] is False

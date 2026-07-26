@@ -135,6 +135,16 @@ TOOLS = [
                     "focus symbols, and a numbered output contract when known."
                 ),
             },
+            "required_paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "default": [],
+                "description": (
+                    "Exact repository-relative source files that must be read before "
+                    "the delegation may return a verified report. Paths must include "
+                    "the owner/repository prefix."
+                ),
+            },
             "tools": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -616,10 +626,14 @@ def _summarize_payload(name: str, payload: dict[str, Any]) -> str:
         summary = _first_text(payload.get("summary"), limit=180)
         return f"Context bundle found {files} files and {risks} risks. {summary}".strip()
     if name == "review_diff":
-        files = len(payload.get("files_touched") or [])
+        manifest = payload.get("diff_manifest") if isinstance(payload.get("diff_manifest"), dict) else {}
+        files = manifest.get("file_count", len(payload.get("files_touched") or []))
+        source = manifest.get("source_file_count")
+        tests = manifest.get("test_file_count")
         risks = len(payload.get("risks") or [])
         summary = _first_text(payload.get("summary"), limit=180)
-        return f"Diff review touched {files} files and found {risks} risks. {summary}".strip()
+        breakdown = f" ({source} source, {tests} test)" if source is not None and tests is not None else ""
+        return f"Diff review touched {files} files{breakdown} and found {risks} risks. {summary}".strip()
     if name == "audit_issue":
         findings = len(payload.get("findings") or [])
         status = payload.get("status", "complete")

@@ -257,6 +257,7 @@ async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
                 system_prompt=req.system_prompt,
                 max_iterations=req.max_iterations,
                 allowed_scopes=req.allowed_scopes,
+                required_paths=req.required_paths,
             ),
             timeout=_wall_limit,
         )
@@ -306,6 +307,11 @@ async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
             )
         if result.stopped_reason == "final_answer" and result.verification.get("passed") is not True:
             warnings.append("final_answer was not positively verified")
+        if not result.evidence_coverage.get("complete", True):
+            warnings.append(
+                "required source files were not read: "
+                + ", ".join(result.evidence_coverage.get("missing_paths", []))
+            )
         if result.unknown_tools:
             warnings.append(
                 f"ignored unknown tools: {result.unknown_tools}; see GET /agents/tools for valid names"
@@ -325,9 +331,18 @@ async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
         except Exception:
             pass
 
+        if result.stopped_reason == "final_answer" and result.verification.get("passed") is True:
+            work_status = "verified"
+        elif result.stopped_reason in {"timeout", "model_error", "error"} and not result.tool_calls_made:
+            work_status = "failed"
+        elif result.tool_calls_made:
+            work_status = "partial"
+        else:
+            work_status = "blocked"
+
         response_payload = {
             "run_id":               run_id,
-            "status":               "complete" if result.stopped_reason == "final_answer" else result.stopped_reason,
+            "status":               work_status,
             "task":                 req.task,
             "final_answer":         result.final_answer,
             "tool_calls_made":      result.tool_calls_made,
@@ -338,6 +353,7 @@ async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
             "memory_hits":          result.memory_hits,
             "plan_state":           result.plan_state,
             "verification":         result.verification,
+            "evidence_coverage":    result.evidence_coverage,
         }
         artifacts = artifact_store.write_record(
             event_id=run_id,

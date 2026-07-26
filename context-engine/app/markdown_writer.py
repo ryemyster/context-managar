@@ -307,20 +307,37 @@ def write_diff(
     risks: list[str],
     files_touched: list[str],
     test_recs: list[str],
+    diff_manifest: dict | None = None,
+    risk_findings: list[dict] | None = None,
 ) -> str:
     from hashlib import md5
     slug = md5(summary[:100].encode()).hexdigest()[:8]
+    manifest = diff_manifest or {"file_count": len(files_touched)}
+    classified = risk_findings or []
+    risk_bucket_lines = [
+        f"{item.get('category', 'unknown')}: {item.get('description', '')}"
+        for item in classified
+    ]
     content = f"""# Diff Summary
 _Generated: {ts()} — Model: {inference.settings.reasoning_model}_
 
 ## Summary
 {summary}
 
-## Files Touched ({len(files_touched)})
+## Deterministic Diff Manifest
+- Files touched: {manifest.get("file_count", len(files_touched))}
+- Source files: {manifest.get("source_file_count", 0)}
+- Test files: {manifest.get("test_file_count", 0)}
+- Truncated for model: {manifest.get("truncated_for_model", False)}
+
+## Files Touched ({manifest.get("file_count", len(files_touched))})
 {_list(files_touched)}
 
 ## Risks
 {_list(risks)}
+
+## Risk Classification
+{_list(risk_bucket_lines)}
 
 ## Test Recommendations
 {_list(test_recs)}

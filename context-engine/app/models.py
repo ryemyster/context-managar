@@ -2,8 +2,10 @@
 models.py — Pydantic request/response models for all endpoints.
 """
 
+from pathlib import Path
 from typing import Literal, Optional
 from pydantic import BaseModel, field_validator
+from . import config
 
 
 DetailLevel = Literal["summary", "standard", "full"]
@@ -22,12 +24,24 @@ _BARE_SOURCE_ROOTS = {
 
 
 def _is_scoped_repo_path(path: str) -> bool:
-    if not path or path.startswith("/") or path in {".", "/"}:
+    if not path or path in {".", "/"}:
         return False
-    parts = [part for part in path.strip("/").split("/") if part]
+    raw = path.strip()
+    if raw.startswith("/"):
+        try:
+            resolved = Path(raw).expanduser().resolve()
+            repo_root = config.REPO_ROOT.resolve()
+        except Exception:
+            return False
+        if not resolved.is_relative_to(repo_root):
+            return False
+        return resolved != repo_root
+    parts = [part for part in raw.strip("/").split("/") if part and part != "."]
     if len(parts) < 2 or ".." in parts:
         return False
-    return parts[0] not in _BARE_SOURCE_ROOTS
+    if parts[0] in _BARE_SOURCE_ROOTS:
+        return False
+    return True
 
 
 def _validate_scoped_repo_path(path: str, field_name: str) -> str:
@@ -255,6 +269,14 @@ class AgentRunRequest(BaseModel):
     max_iterations: int = 10
     system_prompt: Optional[str] = None
     allowed_scopes: Optional[list[str]] = None   # None = all scopes permitted
+    required_paths: list[str] = []  # exact source files that must be read for a verified report
+
+    @field_validator("required_paths")
+    @classmethod
+    def required_paths_must_be_scoped(cls, v: list[str]) -> list[str]:
+        for path in v:
+            _validate_scoped_repo_path(path, f"required path {path!r}")
+        return list(dict.fromkeys(v))
 
 class LogLevelRequest(BaseModel):
     level: str                         # TRACE | DEBUG | INFO | WARNING | ERROR
@@ -266,7 +288,7 @@ class LogLevelResponse(BaseModel):
 
 class AgentRunResponse(BaseModel):
     run_id: str
-    status: str                      # "running" | "complete" | "error"
+    status: str                      # "running" | "verified" | "partial" | "blocked" | "failed"
     task: str
     final_answer: str = ""
     tool_calls_made: list[dict] = []
@@ -278,3 +300,4 @@ class AgentRunResponse(BaseModel):
     memory_hits: int = 0
     plan_state: dict = {}
     verification: dict = {}
+    evidence_coverage: dict = {}

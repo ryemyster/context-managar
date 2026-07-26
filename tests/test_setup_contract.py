@@ -36,6 +36,10 @@ async def test_setup_is_context_safe_operational_playbook():
     assert "codex mcp add context-engine --url" in body
     assert ":8089/mcp" in body
     assert "**Path Contract**" in body
+    assert "**MCP Delegation Contract**" in body
+    assert "`investigate_codebase` MCP tool" in body
+    assert "**Required Evidence**" in body
+    assert "`required_paths`" in body
     assert "**Reference-First Lookups**" in body
     assert "**Curated Memory Writes**" in body
     assert "**Context-Safe Mode**" in body
@@ -62,6 +66,8 @@ async def test_setup_is_context_safe_operational_playbook():
     assert "Do not treat the artifact summary as a conclusive answer" in body
     assert "If an agent or endpoint returns clarification questions" in body
     assert "With MCP `mode=context_safe`, expect a compact artifact reference/summary" in body
+    assert "status: verified" in body
+    assert "evidence_coverage.complete: true" in body
 
 
 @pytest.mark.asyncio
