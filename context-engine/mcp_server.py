@@ -23,7 +23,7 @@ os.environ.setdefault(
     str(Path.home() / "Library/Application Support/context-store/artifacts"),
 )
 sys.path.insert(0, os.path.dirname(__file__))
-from app import artifact_store
+from app import artifact_store, tool_registry
 
 
 ENGINE_BASE = os.getenv("CONTEXT_ENGINE_URL", "http://localhost:8088").rstrip("/")
@@ -139,7 +139,15 @@ TOOLS = [
                 "type": "array",
                 "items": {"type": "string"},
                 "default": [],
-                "description": "Optional internal-agent tool allowlist. Empty enables all.",
+                "description": (
+                    "Optional internal-agent tool allowlist. Empty enables all. Valid "
+                    "names: scan_directory, find_in_code, read_file, grep, "
+                    "health_check, search_memory, update_plan. These are internal "
+                    "ReAct-loop tools, not MCP tool names — do not pass names like "
+                    "investigate_codebase, summarize_file, or vector_search here. "
+                    "Unrecognized entries are dropped with a warning rather than "
+                    "failing the run."
+                ),
             },
             "max_iterations": {
                 "type": "integer",
@@ -733,9 +741,50 @@ def _pop_response_mode(arguments: dict[str, Any]) -> tuple[dict[str, Any], str]:
     return rest_arguments, mode
 
 
+# MCP-facing tool names that callers commonly (but incorrectly) pass to the
+# `tools` allowlist, mapped to their nearest internal ReAct-loop equivalent.
+# See tool_registry.ALL_TOOLS for the authoritative internal tool names.
+_TOOL_NAME_ALIASES = {
+    "summarize_file": "read_file",
+    "vector_search": "search_memory",
+}
+
+
+def _normalize_investigate_tools(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Alias MCP-facing tool names and drop unknown ones before hitting /agents/run."""
+    normalized = dict(arguments)
+    raw_tools = normalized.get("tools")
+    if not isinstance(raw_tools, list):
+        return normalized
+
+    aliased: list[str] = []
+    dropped: list[str] = []
+    for entry in raw_tools:
+        if not isinstance(entry, str):
+            continue
+        name = _TOOL_NAME_ALIASES.get(entry, entry)
+        if name in tool_registry.ALL_TOOLS:
+            if name not in aliased:
+                aliased.append(name)
+        else:
+            dropped.append(entry)
+
+    normalized["tools"] = aliased or None
+
+    if dropped:
+        dropped_note = (
+            "\n\nIgnored unrecognized entries in `tools` (no internal-agent "
+            f"equivalent): {dropped}. Valid internal tool names: "
+            f"{tool_registry.ALL_TOOLS}."
+        )
+        normalized["task"] = str(normalized.get("task", "")).rstrip() + dropped_note
+
+    return normalized
+
+
 def _normalize_investigate_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
     """Preserve compatibility with callers that send repo paths as allowed_scopes."""
-    normalized = dict(arguments)
+    normalized = _normalize_investigate_tools(arguments)
     raw_scopes = normalized.get("allowed_scopes")
     if not isinstance(raw_scopes, list):
         return normalized

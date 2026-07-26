@@ -306,6 +306,10 @@ async def _run_agent_background(run_id: str, req: AgentRunRequest) -> None:
             )
         if result.stopped_reason == "final_answer" and result.verification.get("passed") is not True:
             warnings.append("final_answer was not positively verified")
+        if result.unknown_tools:
+            warnings.append(
+                f"ignored unknown tools: {result.unknown_tools}; see GET /agents/tools for valid names"
+            )
 
         written = mw.write_agent_run(
             task=req.task,

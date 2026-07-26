@@ -46,6 +46,7 @@ class AgentResult:
     memory_hits: int = 0
     plan_state: dict = field(default_factory=dict)
     verification: dict = field(default_factory=dict)
+    unknown_tools: list[str] = field(default_factory=list)
 
 
 def _coerce_arguments(raw) -> dict:
@@ -287,10 +288,16 @@ async def run_agent(
     """
     max_iter  = max_iterations if max_iterations is not None else config.AGENT_MAX_ITERATIONS
     budget    = config.OLLAMA_AGENT_TIMEOUT
+    unknown_tools: list[str] = []
     if tools:
-        unknown = [t for t in tools if t not in tool_registry.ALL_TOOLS]
-        if unknown:
-            raise ValueError(f"unknown tools: {unknown}. Available: {tool_registry.ALL_TOOLS}")
+        unknown_tools = [t for t in tools if t not in tool_registry.ALL_TOOLS]
+        if unknown_tools:
+            log.warning(
+                "agent_runner dropped unknown tools=%s available=%s",
+                unknown_tools,
+                tool_registry.ALL_TOOLS,
+            )
+            tools = [t for t in tools if t not in unknown_tools] or None
     available_tools = [
         name
         for name in (tools or tool_registry.ALL_TOOLS)
@@ -386,6 +393,7 @@ async def run_agent(
         memory_hits=memory_hits,
         plan_state=plan_state,
         verification=verification,
+        unknown_tools=unknown_tools,
     )
 
 
